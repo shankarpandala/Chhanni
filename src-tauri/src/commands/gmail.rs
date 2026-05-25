@@ -10,6 +10,7 @@ use crate::auth::keychain::Keychain;
 use crate::auth::token::{AccountRecord, TokenStore};
 use crate::db::{open_with_path, Db, MessagesRepo, SyncStateRepo};
 use crate::providers::gmail::GmailClient;
+use crate::providers::graph::{run_graph_sync, GraphClient};
 use crate::sync::{run_gmail_sync, GmailSyncConfig, SyncProgress};
 
 #[derive(Serialize)]
@@ -74,6 +75,64 @@ pub fn gmail_list_accounts(
     state: State<'_, AppState>,
 ) -> Result<Vec<AccountRecord>, String> {
     state.token_store.list_accounts().map_err(stringify)
+}
+
+#[tauri::command]
+pub async fn graph_connect_account(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<ConnectAccountResult, String> {
+    let creds = crate::auth::graph::load_credentials().map_err(stringify)?;
+    let token_store = state.token_store.clone();
+    let http = state.http.clone();
+    let app_for_open = app.clone();
+    let outcome = crate::auth::graph::connect_account(creds, token_store, http, move |url| {
+        app_for_open
+            .opener()
+            .open_url(url.as_str(), None::<&str>)
+            .map_err(|e| crate::error::AuthError::OAuth {
+                reason: format!("failed to open browser: {e}"),
+            })
+    })
+    .await
+    .map_err(stringify)?;
+    Ok(ConnectAccountResult {
+        account_id: outcome.account_id,
+        email: outcome.email,
+    })
+}
+
+#[tauri::command]
+pub async fn graph_sync(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    account_id: String,
+) -> Result<(), String> {
+    let creds = crate::auth::graph::load_credentials().map_err(stringify)?;
+    let token_store = state.token_store.clone();
+    let http = state.http.clone();
+    let db = state.db.clone();
+
+    let accounts = token_store.list_accounts().map_err(stringify)?;
+    let account = accounts
+        .into_iter()
+        .find(|a| a.account_id == account_id)
+        .ok_or_else(|| format!("account not found: {account_id}"))?;
+    mirror_account(&db, &account)?;
+
+    let token = crate::auth::graph::ensure_fresh_token(&creds, &token_store, &account_id)
+        .await
+        .map_err(stringify)?;
+    let client = GraphClient::new(http, token.access_token);
+
+    let app_for_emit = app.clone();
+    let sink: crate::providers::graph::sync::ProgressSink =
+        Arc::new(move |p: &SyncProgress| {
+            let _ = app_for_emit.emit("sync:progress", p.clone());
+        });
+    run_graph_sync(Arc::new(client), db, &account_id, sink)
+        .await
+        .map_err(stringify)
 }
 
 #[derive(Serialize)]

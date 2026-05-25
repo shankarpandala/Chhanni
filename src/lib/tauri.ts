@@ -158,12 +158,16 @@ export interface AuditExport {
 export const tauriApi = {
   gmailConnectAccount: (): Promise<ConnectAccountResult> =>
     invoke<ConnectAccountResult>("gmail_connect_account"),
+  graphConnectAccount: (): Promise<ConnectAccountResult> =>
+    invoke<ConnectAccountResult>("graph_connect_account"),
   gmailListAccounts: (): Promise<AccountRecord[]> =>
     invoke<AccountRecord[]>("gmail_list_accounts"),
   gmailAccountSummaries: (): Promise<AccountSummary[]> =>
     invoke<AccountSummary[]>("gmail_account_summaries"),
   gmailSync: (accountId: string): Promise<void> =>
     invoke<void>("gmail_sync", { accountId }),
+  graphSync: (accountId: string): Promise<void> =>
+    invoke<void>("graph_sync", { accountId }),
   onSyncProgress: (handler: (p: SyncProgress) => void): Promise<UnlistenFn> =>
     listen<SyncProgress>("sync:progress", (event) => handler(event.payload)),
 

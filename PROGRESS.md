@@ -424,3 +424,59 @@ User: "use the most recent and advanced models that fit in m5 pro 24 GB vram".
 
 **Next**
 - Phase 8 (Outlook / Microsoft Graph parity). Continues next turn.
+
+---
+
+## 2026-05-25 — Phase 8: Microsoft Graph / Outlook parity (✅ shipped)
+
+**Shipped**
+- `auth::graph` mirrors `auth::gmail`: OAuth via the Microsoft identity platform (`common` tenant — works for personal MSA + work/school AAD), scopes `Mail.ReadWrite + offline_access + User.Read`, refresh with the same 3-attempt exponential backoff. `userPrincipalName` fallback when `/me.mail` is null (common on work tenants).
+- `providers::graph::api::GraphClient` implements `GraphApi`:
+  - `fetch_delta(None)` starts a `/me/messages/delta` walk with the right `$select` set (headers, conversationId, from, subject, bodyPreview, isRead, categories, parentFolderId, receivedDateTime).
+  - `fetch_delta(Some(deltaLink))` follows the previously stored delta link verbatim.
+  - `fetch_next(nextLink)` follows `@odata.nextLink`. Same retry-with-backoff on 429/5xx.
+  - Handles `@removed` markers (deleted messages).
+- `providers::graph::sync::run_graph_sync` ingests pages, deletes removed rows, and stores the final `@odata.deltaLink` in `sync_state.cursor_token` (Graph delta tokens are absolute URLs — perfect fit). Maps Outlook concepts onto the shared `messages` schema: `conversationId → thread_id`, `categories → label_ids`, `parentFolderId → FOLDER:<id>` pseudo-label, `isRead == false → UNREAD` pseudo-label. The clustering/classification/review pipeline therefore works on Graph mailboxes unchanged.
+- `providers::graph::mutations::GraphMutationsClient` implements both `GraphMutations` (Graph-native `$batch` POSTs with the 20-request limit) AND the shared `GmailMutations` trait so the existing executor + undo dispatch transparently:
+  - archive → move to the well-known `archive` folder
+  - trash → move to `deleteditems`
+  - mark_read → PATCH `isRead: true`
+  - undo trash → move back to `inbox` (Graph doesn't preserve the source folder)
+  - `add_label` / `remove_label` not implemented yet (Outlook uses category lists rather than labels); returns a clear error.
+- `commands::gmail::graph_connect_account` / `graph_sync` (kept in the `gmail.rs` file rather than a parallel `graph.rs` since they share `AppState` and the existing `mirror_account` helper — this is a refactor that's queued in BACKLOG but not blocking).
+- `commands::execute::run_executor` and `commands::audit::undo_action` now dispatch by `account.provider` so a Run-cleanup / Undo button works regardless of which provider the account uses.
+- Frontend: a "Connect Outlook" button (sky-blue) next to "Connect Gmail" on the accounts card. AccountCard's Sync button automatically dispatches by `account.provider`. The Review and History tabs are already provider-agnostic.
+- `.env.example` documents `GRAPH_CLIENT_ID` (`GRAPH_CLIENT_SECRET` blank for the standard public-client setup).
+
+**Tests** (+10 → 119 total)
+- `auth::graph`: config has Mail.ReadWrite + offline_access; missing GRAPH_CLIENT_ID yields the typed error.
+- `providers::graph::api`: from-email extraction, `@removed` detection, ISO8601 → unix-ms parsing, retryable status matrix.
+- `providers::graph::sync` via a `Fake`: delta walk inserts rows and stores the delta link; `@removed` deletes existing rows; `@odata.nextLink` is followed across pages.
+- `providers::graph::mutations`: retryable status matrix.
+
+**Gate results**
+- `cargo check`, `cargo clippy --all-targets -- -D warnings`, `cargo test` (119 pass), `pnpm typecheck`, `pnpm build`, `pnpm lint` — all green.
+
+**Skipped / deferred**
+- Graph `add_label` / `remove_label`: Outlook uses **category lists**, not labels — to add/remove one you PATCH the full `categories` array. The Phase 5 chips don't expose this surface yet; the mutator returns a clear error. Backlog.
+- Graph mid-sync resume: unlike Gmail, the `@odata.nextLink` is opaque and can expire mid-walk. Today we restart from the previous `deltaLink` on failure. If a mailbox's first sync is ever > 5 minutes (the typical expiry window) we'll need to checkpoint nextLinks mid-page. Backlog.
+- Per-account model selection / disk quota UI when a user connects multiple mailboxes.
+- Real Outlook smoke test — needs an Azure app registration + a tenant willing to grant `Mail.ReadWrite`.
+
+**Surprises**
+- Outlook's "no source folder on trash" gotcha means undo always returns the message to `inbox`. Documented in the mutator; user-visible if someone trashed something that wasn't in `inbox` (rare for our use cases).
+- Graph delta tokens are full absolute URLs (with the token baked into the query string). Storing them in the existing `sync_state.cursor_token` column kept the schema clean — no new "delta_link" column needed.
+- `GraphMutationsClient` implementing both `GmailMutations` AND `GraphMutations` lets the executor stay provider-agnostic; saved building a `MailMutations` umbrella trait.
+
+**User actions before local smoke**
+1. Create an Entra app registration with `Mail.ReadWrite` + `offline_access` + `User.Read`, redirect URI `http://localhost`.
+2. Set `GRAPH_CLIENT_ID` in `.env`.
+3. Click **Connect Outlook**, complete consent.
+4. Click **Sync** on the Outlook card — same UX as Gmail.
+5. Review / Run cleanup / History tabs all work on the Outlook account.
+
+---
+
+## Project status
+
+All 9 phases (0 through 8) shipped on `claude/affectionate-bardeen-KRqgY`. Single draft PR `#1`. 119 Rust tests passing; all 6 gates green. Branch ready for end-to-end smoke against a real mailbox.

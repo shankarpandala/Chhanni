@@ -4,10 +4,11 @@ use serde::Serialize;
 use tauri::State;
 
 use crate::actions::log::{ActionLogEntry, ActionsLogRepo};
-use crate::actions::undo::undo_one;
-use crate::auth::gmail::{ensure_fresh_token, load_credentials};
+use crate::actions::undo::{undo_one, UndoMutations};
+use crate::auth::token::Provider;
 use crate::commands::gmail::AppState;
-use crate::providers::gmail::GmailMutationsClient;
+use crate::providers::gmail::{GmailMutations, GmailMutationsClient};
+use crate::providers::graph::GraphMutationsClient;
 
 fn stringify<E: std::fmt::Display>(e: E) -> String {
     e.to_string()
@@ -30,15 +31,34 @@ pub async fn undo_action(
     log_id: i64,
     account_id: String,
 ) -> Result<(), String> {
-    let creds = load_credentials().map_err(stringify)?;
-    let token = ensure_fresh_token(&creds, &state.token_store, &account_id)
-        .await
-        .map_err(stringify)?;
-    let client = Arc::new(GmailMutationsClient::new(
-        state.http.clone(),
-        token.access_token,
-    ));
-    undo_one(&*client, &*client, &state.db, log_id).await
+    let accounts = state.token_store.list_accounts().map_err(stringify)?;
+    let account = accounts
+        .into_iter()
+        .find(|a| a.account_id == account_id)
+        .ok_or_else(|| format!("account not found: {account_id}"))?;
+
+    match account.provider {
+        Provider::Gmail => {
+            let creds = crate::auth::gmail::load_credentials().map_err(stringify)?;
+            let token = crate::auth::gmail::ensure_fresh_token(&creds, &state.token_store, &account_id)
+                .await
+                .map_err(stringify)?;
+            let client = Arc::new(GmailMutationsClient::new(state.http.clone(), token.access_token));
+            let m: Arc<dyn GmailMutations> = client.clone();
+            let u: Arc<dyn UndoMutations> = client;
+            undo_one(&*m, &*u, &state.db, log_id).await
+        }
+        Provider::Graph => {
+            let creds = crate::auth::graph::load_credentials().map_err(stringify)?;
+            let token = crate::auth::graph::ensure_fresh_token(&creds, &state.token_store, &account_id)
+                .await
+                .map_err(stringify)?;
+            let client = Arc::new(GraphMutationsClient::new(state.http.clone(), token.access_token));
+            let m: Arc<dyn GmailMutations> = client.clone();
+            let u: Arc<dyn UndoMutations> = client;
+            undo_one(&*m, &*u, &state.db, log_id).await
+        }
+    }
 }
 
 #[derive(Serialize)]

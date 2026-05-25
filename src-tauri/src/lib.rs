@@ -52,6 +52,8 @@ pub fn run() {
             commands::gmail::gmail_list_accounts,
             commands::gmail::gmail_account_summaries,
             commands::gmail::gmail_sync,
+            commands::gmail::graph_connect_account,
+            commands::gmail::graph_sync,
             commands::pipeline::embed_bootstrap,
             commands::pipeline::classifier_bootstrap,
             commands::pipeline::embed_run,

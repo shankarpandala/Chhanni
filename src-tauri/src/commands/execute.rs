@@ -7,9 +7,10 @@ use crate::actions::executor::{
     execute_account, CancellationToken, ExecuteConfig, ExecuteProgress, ExecuteSink,
 };
 use crate::actions::{ActionLogEntry, ActionsLogRepo, OutcomeCounts};
-use crate::auth::gmail::{ensure_fresh_token, load_credentials};
+use crate::auth::token::Provider;
 use crate::commands::gmail::AppState;
-use crate::providers::gmail::GmailMutationsClient;
+use crate::providers::gmail::{GmailMutations, GmailMutationsClient};
+use crate::providers::graph::GraphMutationsClient;
 
 /// One in-flight executor per (account_id, current run). Stored in `AppState`
 /// so a cancel button on the frontend can flip the bool.
@@ -48,11 +49,28 @@ pub async fn run_executor(
     registry: State<'_, ExecutorRegistry>,
     account_id: String,
 ) -> Result<(), String> {
-    let creds = load_credentials().map_err(stringify)?;
-    let token = ensure_fresh_token(&creds, &state.token_store, &account_id)
-        .await
-        .map_err(stringify)?;
-    let mutator = Arc::new(GmailMutationsClient::new(state.http.clone(), token.access_token));
+    let accounts = state.token_store.list_accounts().map_err(stringify)?;
+    let account = accounts
+        .into_iter()
+        .find(|a| a.account_id == account_id)
+        .ok_or_else(|| format!("account not found: {account_id}"))?;
+
+    let mutator: Arc<dyn GmailMutations> = match account.provider {
+        Provider::Gmail => {
+            let creds = crate::auth::gmail::load_credentials().map_err(stringify)?;
+            let token = crate::auth::gmail::ensure_fresh_token(&creds, &state.token_store, &account_id)
+                .await
+                .map_err(stringify)?;
+            Arc::new(GmailMutationsClient::new(state.http.clone(), token.access_token))
+        }
+        Provider::Graph => {
+            let creds = crate::auth::graph::load_credentials().map_err(stringify)?;
+            let token = crate::auth::graph::ensure_fresh_token(&creds, &state.token_store, &account_id)
+                .await
+                .map_err(stringify)?;
+            Arc::new(GraphMutationsClient::new(state.http.clone(), token.access_token))
+        }
+    };
 
     let cancel = registry.register(&account_id);
 

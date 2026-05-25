@@ -59,8 +59,14 @@ interface ConnectPanelProps {
 function ConnectPanel({ accountsQuery }: ConnectPanelProps): JSX.Element {
   const queryClient = useQueryClient();
 
-  const connect = useMutation({
+  const connectGmail = useMutation({
     mutationFn: tauriApi.gmailConnectAccount,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["accountSummaries"] });
+    },
+  });
+  const connectOutlook = useMutation({
+    mutationFn: tauriApi.graphConnectAccount,
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["accountSummaries"] });
     },
@@ -76,19 +82,38 @@ function ConnectPanel({ accountsQuery }: ConnectPanelProps): JSX.Element {
             only your browser sees the consent screen.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => connect.mutate()}
-          disabled={connect.isPending}
-          className="shrink-0 rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {connect.isPending ? "Waiting…" : "Connect Gmail"}
-        </button>
+        <div className="flex shrink-0 gap-2">
+          <button
+            type="button"
+            onClick={() => connectGmail.mutate()}
+            disabled={connectGmail.isPending}
+            className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {connectGmail.isPending ? "Waiting…" : "Connect Gmail"}
+          </button>
+          <button
+            type="button"
+            onClick={() => connectOutlook.mutate()}
+            disabled={connectOutlook.isPending}
+            className="rounded-md bg-sky-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {connectOutlook.isPending ? "Waiting…" : "Connect Outlook"}
+          </button>
+        </div>
       </div>
 
-      {connect.isError ? (
+      {connectGmail.isError ? (
         <p className="mt-3 text-xs text-red-400">
-          {connect.error instanceof Error ? connect.error.message : "Connection failed"}
+          {connectGmail.error instanceof Error
+            ? connectGmail.error.message
+            : "Gmail connection failed"}
+        </p>
+      ) : null}
+      {connectOutlook.isError ? (
+        <p className="mt-3 text-xs text-red-400">
+          {connectOutlook.error instanceof Error
+            ? connectOutlook.error.message
+            : "Outlook connection failed"}
         </p>
       ) : null}
 
@@ -148,7 +173,10 @@ function AccountCard({ account }: AccountCardProps): JSX.Element {
   }, [account.account_id]);
 
   const sync = useMutation({
-    mutationFn: () => tauriApi.gmailSync(account.account_id),
+    mutationFn: () =>
+      account.provider === "graph"
+        ? tauriApi.graphSync(account.account_id)
+        : tauriApi.gmailSync(account.account_id),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["accountSummaries"] });
     },
