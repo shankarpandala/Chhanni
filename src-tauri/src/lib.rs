@@ -10,7 +10,10 @@
 
 pub mod auth;
 pub mod commands;
+pub mod db;
 pub mod error;
+pub mod providers;
+pub mod sync;
 
 use tracing::info;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
@@ -42,6 +45,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::gmail::gmail_connect_account,
             commands::gmail::gmail_list_accounts,
+            commands::gmail::gmail_account_summaries,
+            commands::gmail::gmail_sync,
         ]);
 
     if let Err(err) = builder.run(tauri::generate_context!()) {

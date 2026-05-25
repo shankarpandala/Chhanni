@@ -89,3 +89,59 @@ Append-only. One section per phase or significant milestone.
 
 **Next**
 - Phase 2: SQLite schema + incremental Gmail sync. Proceeding without explicit go-ahead per standing instruction.
+
+---
+
+## 2026-05-25 — Phase 2: Local schema + incremental Gmail sync (✅ shipped)
+
+**Shipped**
+- `migrations/V001…V005`: `accounts`, `messages` (with sender/subject/snippet/label_ids JSON), `threads`, `labels`, `sync_state`. FK CASCADE from messages → accounts. Indexes on (account, thread), (account, sender_email), (account, internal_date DESC).
+- `db::connection::Db` — shared `Arc<Mutex<Connection>>` wrapper; WAL + foreign_keys + temp_store=MEMORY pragmas; `default_db_path()` resolves via `directories` (overridable via `CHHANNI_DATA_DIR`).
+- `db::messages::MessagesRepo` — single-row + bulk-tx `upsert_many` with idempotent ON CONFLICT.
+- `db::sync_state::SyncStateRepo` — `Initial → Incremental` phase transitions, cursor + history-id checkpointing.
+- `providers/gmail/api.rs` — typed `GmailApi` trait + `GmailClient` impl. `list_messages`, `get_metadata(format=METADATA, From+Subject+List-Unsubscribe headers)`, `list_history`. Retry-with-backoff on 429/5xx (max 4 attempts).
+- `providers/gmail/parse.rs` — `parse_sender_email` strips angle-bracketed addrs, lowercases for clustering.
+- `sync/gmail.rs` — orchestrator:
+  - Resumes from `sync_state` (none → initial; Initial+cursor → resume; Incremental+history_id → history.list).
+  - Initial: paginates list, fetches metadata with `FuturesUnordered` (concurrency 20), persists in 100-row tx batches, checkpoints `(cursor_token, highest_history_id)` after every page, then `mark_initial_complete`.
+  - Incremental: walks `history.list`, dedupes (added + label-changed) refs per page, deletes messages on `messagesDeleted`, refreshes the rest, updates `last_history_id` + `last_sync_at` after every page.
+  - Emits `SyncProgress { stage, messages_seen, messages_persisted, elapsed_ms }` to a `ProgressSink` callback.
+- Tauri commands:
+  - `gmail_sync(account_id)` — mirrors keychain account → `accounts` row, refreshes access token via `ensure_fresh_token`, instantiates `GmailClient`, emits `sync:progress` events to the frontend.
+  - `gmail_account_summaries()` — joins keychain accounts + message count + sync state for the UI.
+- Frontend: `AccountCard` per account with a Sync button, live progress line driven by the Tauri event bus.
+
+**Tests** (43 total in `cargo test`)
+- DB: in-memory migrations, idempotent re-open, sync_state CRUD + phase transitions, messages CRUD + bulk-tx + idempotence (8 in db::)
+- Sender parsing: 4 cases incl. case folding
+- Gmail API: header lookup, numeric parsing, `is_retryable` matrix (3)
+- Sync engine via a `Fake` GmailApi: full initial → Incremental transition; idempotent re-run (no-op when history is empty); empty mailbox baseline history_id=1; **resume after simulated interruption** (page 1 checkpoints cursor, then network error → state remains Initial+cursor, second client completes the walk); incremental adds+deletes (5)
+
+**Gate results** (in container)
+- `cargo check` ✅
+- `cargo clippy --all-targets -- -D warnings` ✅
+- `cargo test` ✅ (43 pass)
+- `pnpm typecheck` ✅
+- `pnpm build` ✅
+- `pnpm lint` ✅
+
+**Skipped / deferred**
+- `messages.batchGet` proper — Google's REST does not actually support a batched body for `users.messages` of the form we need without multipart. We use parallel `get_metadata` requests at concurrency 20 instead. For the 5K-message target this is roughly 250 round-trips × ~50 ms ≈ 12 s, well inside the 90 s budget. Real multipart batch optimization is in BACKLOG if we ever miss the target.
+- Threads + labels tables defined but not populated yet — clustering and the review UI don't need them until Phase 3/5. Logged.
+- Performance target (5K msgs in < 90 s) cannot be verified in this headless container against a real Gmail account. The user should validate locally after smoke-testing Phase 1.
+- Cancellation token: `gmail_sync` runs to completion. The CLAUDE.md anti-pattern list flags long ops without a cancel; UI doesn't need it for the < 2 min initial sync today, but a `CancellationToken` is on the BACKLOG for Phase 6.
+
+**Surprises**
+- `refinery::embed_migrations!` generates an inner `mod migrations { … pub fn runner() }` rather than placing `runner` at the call site. Needed an extra path segment (`embedded::migrations::runner()`).
+- `rusqlite` 0.32 + `time` feature exposes `time::OffsetDateTime` as a value type for query bindings, but our timestamps are written via `strftime('%Y-%m-%dT%H:%M:%fZ', 'now')` in SQL to keep the source-of-truth single (SQLite, not the app's clock).
+- `clippy::redundant_closure` caught one closure that could be a function pointer — fixed.
+
+**User actions before local smoke test**
+1. Phase 1 prereqs still apply (`GMAIL_CLIENT_ID` etc.).
+2. After connecting an account, click **Sync** on its card. Watch the live progress line and the count climb.
+3. Kill the app mid-sync. Restart. The card should still show "initial" phase. Click Sync again — it resumes.
+4. Click Sync a third time after completion. It should be a near-instant no-op (incremental with no new history records).
+5. Confirm the SQLite file exists at the platform app-data path (`~/Library/Application Support/com.chhanni.chhanni/chhanni.sqlite` on macOS).
+
+**Next**
+- Phase 3 (embedding + clustering with bundled llama.cpp sidecar) is the next chunk. Larger lift: vendoring/building the sidecar binary, model downloads with resumable HTTP, `sqlite-vec` integration. Will start in the next turn unless interrupted.

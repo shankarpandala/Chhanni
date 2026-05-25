@@ -43,3 +43,58 @@ impl From<keyring::Error> for AuthError {
 }
 
 pub type AuthResult<T> = Result<T, AuthError>;
+
+#[derive(Debug, Error)]
+pub enum DbError {
+    #[error("sqlite error")]
+    Sqlite(#[source] rusqlite::Error),
+
+    #[error("io error")]
+    Io(#[source] std::io::Error),
+
+    #[error("migration failed: {0}")]
+    Migration(String),
+
+    #[error("could not determine platform data directory")]
+    DataDirUnavailable,
+
+    #[error("row not found")]
+    NotFound,
+
+    #[error("malformed row payload")]
+    Malformed(#[source] serde_json::Error),
+}
+
+impl From<rusqlite::Error> for DbError {
+    fn from(value: rusqlite::Error) -> Self {
+        match value {
+            rusqlite::Error::QueryReturnedNoRows => DbError::NotFound,
+            other => DbError::Sqlite(other),
+        }
+    }
+}
+
+pub type DbResult<T> = Result<T, DbError>;
+
+#[derive(Debug, Error)]
+pub enum SyncError {
+    #[error("auth: {0}")]
+    Auth(#[from] AuthError),
+
+    #[error("db: {0}")]
+    Db(#[from] DbError),
+
+    #[error("gmail api: {0}")]
+    Gmail(#[source] reqwest::Error),
+
+    #[error("gmail api returned http {status}: {body}")]
+    GmailStatus { status: u16, body: String },
+
+    #[error("malformed gmail response")]
+    GmailMalformed(#[source] serde_json::Error),
+
+    #[error("sync was cancelled")]
+    Cancelled,
+}
+
+pub type SyncResult<T> = Result<T, SyncError>;

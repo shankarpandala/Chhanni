@@ -30,6 +30,11 @@ uuid = { version = "1", features = ["v4", "serde"] }
 keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native-sync-persistent"] }
 time = { version = "0.3", features = ["serde", "serde-human-readable"] }
 parking_lot = "0.12"
+rusqlite = { version = "0.32", features = ["bundled", "serde_json", "time"] }
+refinery = { version = "0.8", features = ["rusqlite"] }
+futures = "0.3"
+async-trait = "0.1"
+directories = "5"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["test-util", "macros", "rt", "rt-multi-thread"] }

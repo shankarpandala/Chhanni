@@ -15,3 +15,8 @@ Things discovered out of current phase scope. Do not silently implement.
 - **`dotenvy` for local dev**: load `.env` automatically on `pnpm tauri dev` so contributors don't have to export shell vars.
 - **End-to-end OAuth tests via `wiremock`**: simulate Google's token endpoint to cover the full code-for-token swap and refresh path.
 - **Account-management UX**: remove button, re-consent on revoked refresh tokens, avatars from `userinfo.picture`.
+- **Gmail multipart batch endpoint** at `/batch/gmail/v1` for metadata fetches if parallel `get` ever misses the 90 s budget on the target hardware.
+- **Sync cancellation token** wired through `gmail_sync` and surfaced as a cancel button.
+- **Threads + labels population** during sync (tables exist but unused).
+- **Sync scheduling** (background re-sync every N minutes, not just on-click).
+- **SQLite vacuum / WAL truncation** policy after large delete batches in Phase 6.

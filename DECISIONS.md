@@ -125,6 +125,42 @@ Append-only. One entry per non-trivial choice. Format:
 
 ---
 
+## 2026-05-25 — SQLite connection model: single `Arc<Mutex<Connection>>`
+
+**Context**: Phase 2 needs concurrent access to SQLite from the sync engine, the command layer, and (later) the embedding pipeline. Options: r2d2/deadpool-sqlite pool, sqlx async, or one shared connection behind a Mutex.
+**Decision**: One connection wrapped in `Arc<Mutex<Connection>>` via `db::Db`.
+**Reasoning**: SQLite serializes writers anyway; with WAL we get cheap concurrent reads but only one writer. Our workload is one mailbox at a time. A pool adds operational complexity (lifetime management, deadlock surface) without a real throughput win at this scale. If the embedding pipeline (Phase 3) ever needs parallel reads, we can add a read-only pool then.
+**Reversibility**: easy — `Db` is the only seam.
+
+---
+
+## 2026-05-25 — Sync cursor model: phase + cursor + history_id
+
+**Context**: Gmail's incremental story is two-stage: `messages.list` for the initial walk (paginated, no history baseline), then `history.list(startHistoryId=…)` for incremental updates. We need to model the transition without losing progress on interruption.
+**Decision**: `sync_state` row per account holds `phase` ∈ {`initial`, `incremental`}, `cursor_token` (Gmail pageToken during initial), `last_history_id`. After every page we upsert this row inside the same conceptual operation as the message inserts. Transition to `incremental` happens via `mark_initial_complete(account_id, highest_history_id)` once the initial walk's `nextPageToken` is `None`.
+**Reasoning**: Single source of truth for "where am I?", trivially resumable, also a useful UI signal ("syncing initial …" vs "checking for changes …"). Storing the highest seen historyId during the initial walk gives `history.list` a valid baseline the moment the walk completes.
+**Reversibility**: moderate — schema change would require a migration.
+
+---
+
+## 2026-05-25 — Metadata fetch: parallel `messages.get` not `batchGet`
+
+**Context**: The plan called for "messages.batchGet" to grab 100 metadata payloads per call. Google's REST API does not actually expose a body-form batchGet for `users.messages`; the supported batch mechanism is HTTP multipart against `/batch/gmail/v1`, which complicates retries and per-request token refresh.
+**Decision**: Use `FuturesUnordered` with concurrency 20 against `users.messages.get?format=METADATA&metadataHeaders=From,Subject,List-Unsubscribe`.
+**Reasoning**: 20 concurrent requests against a single user account is well below per-user quota (~2.5 quota units × 250 calls/page = 50k/min limit). Simpler retry surface, simpler per-request token refresh. Multipart batch optimization is on the BACKLOG if we ever miss the 90s budget.
+**Reversibility**: easy.
+
+---
+
+## 2026-05-25 — Snippet + subject stored plaintext in SQLite
+
+**Context**: Subjects and snippets contain PII. Two options: store as-is, store hashed.
+**Decision**: Store plaintext. SQLite file is per-user under platform app-data, filesystem-permission only.
+**Reasoning**: Clustering + classification need to read these. Hashing them defeats their purpose. SQLCipher is on the BACKLOG if/when the threat model changes.
+**Reversibility**: moderate (would require backfill).
+
+---
+
 ## 2026-05-25 — Icons: placeholder for now
 
 **Context**: Tauri's `generate_context!` requires icon paths to exist at compile time.
