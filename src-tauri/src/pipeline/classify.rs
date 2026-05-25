@@ -34,7 +34,7 @@ pub struct ClassifyConfig {
 impl Default for ClassifyConfig {
     fn default() -> Self {
         Self {
-            model_version: "Qwen3-4B-Instruct-2507/Q4_K_M".to_owned(),
+            model_version: "Qwen3-30B-A3B-Instruct-2507/Q4_K_M".to_owned(),
             samples_per_cluster: 3,
             max_clusters: None,
         }

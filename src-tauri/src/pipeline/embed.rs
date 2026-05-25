@@ -22,10 +22,12 @@ pub struct EmbedConfig {
 impl Default for EmbedConfig {
     fn default() -> Self {
         Self {
-            model_version: "nomic-embed-text-v1.5/Q8_0".to_owned(),
+            model_version: "Qwen3-Embedding-0.6B/Q8_0".to_owned(),
             concurrency: 8,
             batch_persist: 64,
-            expected_dim: Some(768),
+            // Qwen3-Embedding-0.6B emits 1024-dim by default. Matryoshka-capable
+            // so callers can request shorter via API; we don't currently.
+            expected_dim: Some(1024),
         }
     }
 }

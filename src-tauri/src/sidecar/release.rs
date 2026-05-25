@@ -84,36 +84,38 @@ pub struct ModelAsset {
     pub local_filename: String,
 }
 
-/// Default embedding model: `nomic-embed-text-v2-moe` Q8_0.
-/// 512 MB GGUF, 768-dim Matryoshka output, multilingual, 8192-token context.
-/// Supersedes v1.5 (newer architecture, similar latency, broader language coverage).
+/// Default embedding model: `Qwen3-Embedding-0.6B` Q8_0.
+/// 639 MB GGUF; #1 model in the Qwen3-Embedding family for size-vs-MTEB on
+/// the multilingual benchmark; 8B sibling is even stronger but we don't need
+/// the headroom for short email text. Tiny disk and RAM footprint leaves room
+/// for the 30B-A3B classifier to coexist on the same 24 GB machine.
 pub fn embedding_model() -> ModelAsset {
     let url = std::env::var("CHHANNI_EMBED_MODEL_URL").unwrap_or_else(|_| {
-        "https://huggingface.co/nomic-ai/nomic-embed-text-v2-moe-GGUF/resolve/main/nomic-embed-text-v2-moe.Q8_0.gguf"
+        "https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/main/Qwen3-Embedding-0.6B-Q8_0.gguf"
             .to_owned()
     });
     ModelAsset {
         url,
         sha256: std::env::var("CHHANNI_EMBED_MODEL_SHA256").ok(),
-        local_filename: "nomic-embed-text-v2-moe.Q8_0.gguf".to_owned(),
+        local_filename: "Qwen3-Embedding-0.6B-Q8_0.gguf".to_owned(),
     }
 }
 
-/// Default classifier / reasoner model: `Qwen3-4B-Instruct-2507` Q4_K_M.
-/// ~2.5 GB GGUF. Selected over Gemma 3 4B for stronger JSON-schema following
-/// and broader multilingual coverage (important for email mailboxes that mix
-/// English with the user's native language). Quantization is Q4_K_M because
-/// classification doesn't need Q5+ headroom; Q4_K_M leaves ~22 GB free on
-/// the 24 GB target machine for the OS, browser, and Tauri runtime.
+/// Default classifier / reasoner model: `Qwen3-30B-A3B-Instruct-2507` Q4_K_M.
+/// 18.6 GB GGUF. MoE flagship with only ~3B active parameters per token, so
+/// inference on Apple Silicon is ~50-100 tok/s thanks to memory-bandwidth-
+/// bound MoE expert dispatch. Together with the 0.6B embedding model this
+/// leaves ~5 GB headroom on a 24 GB M5 Pro for the OS, browser, and Tauri
+/// runtime. Best-in-class JSON-schema following at this size class.
 pub fn classifier_model() -> ModelAsset {
     let url = std::env::var("CHHANNI_CLASSIFIER_MODEL_URL").unwrap_or_else(|_| {
-        "https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/main/Qwen3-4B-Instruct-2507-Q4_K_M.gguf"
+        "https://huggingface.co/unsloth/Qwen3-30B-A3B-Instruct-2507-GGUF/resolve/main/Qwen3-30B-A3B-Instruct-2507-Q4_K_M.gguf"
             .to_owned()
     });
     ModelAsset {
         url,
         sha256: std::env::var("CHHANNI_CLASSIFIER_MODEL_SHA256").ok(),
-        local_filename: "Qwen3-4B-Instruct-2507-Q4_K_M.gguf".to_owned(),
+        local_filename: "Qwen3-30B-A3B-Instruct-2507-Q4_K_M.gguf".to_owned(),
     }
 }
 
