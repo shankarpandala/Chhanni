@@ -111,9 +111,12 @@ pub async fn execute_account(
                 return Err(SyncError::Cancelled);
             }
             let chunk_owned: Vec<String> = chunk.to_vec();
+            // Snapshot the prior label_ids per message BEFORE the mutation so
+            // undo can reverse without an extra round-trip.
+            let prior = snapshot_labels(&db, account_id, &chunk_owned)?;
             match dispatch(&*mutator, item.action, &chunk_owned).await {
                 Ok(()) => {
-                    ActionsLogRepo::new(&db).record_many(
+                    ActionsLogRepo::new(&db).record_many_with_prior(
                         account_id,
                         Some(item.staged_id),
                         &item.cluster_key,
@@ -121,6 +124,7 @@ pub async fn execute_account(
                         &chunk_owned,
                         Outcome::Success,
                         None,
+                        &prior,
                     )?;
                     messages_done += chunk_owned.len() as u64;
                 }
@@ -249,6 +253,47 @@ fn collect_work(db: &Db, account_id: &str) -> SyncResult<Vec<WorkItem>> {
         }
     }
     Ok(out)
+}
+
+fn snapshot_labels(
+    db: &Db,
+    account_id: &str,
+    ids: &[String],
+) -> SyncResult<HashMap<String, String>> {
+    if ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    db.with_connection(|conn| {
+        let mut sql = String::from(
+            "SELECT provider_msg_id, label_ids FROM messages
+             WHERE account_id = ?1 AND provider_msg_id IN (",
+        );
+        for i in 0..ids.len() {
+            if i > 0 {
+                sql.push(',');
+            }
+            sql.push_str(&format!("?{}", i + 2));
+        }
+        sql.push(')');
+        let mut stmt = conn.prepare(&sql).map_err(DbError::from)?;
+        let mut bound: Vec<String> = Vec::with_capacity(ids.len() + 1);
+        bound.push(account_id.to_owned());
+        for id in ids {
+            bound.push(id.clone());
+        }
+        let rows = stmt
+            .query_map(rusqlite::params_from_iter(bound.iter()), |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+            })
+            .map_err(DbError::from)?;
+        let mut out = HashMap::new();
+        for r in rows {
+            let (id, labels) = r.map_err(DbError::from)?;
+            out.insert(id, labels);
+        }
+        Ok(out)
+    })
+    .map_err(SyncError::from)
 }
 
 fn fetch_members(db: &Db, account_id: &str, cluster_key: &str) -> SyncResult<Vec<String>> {

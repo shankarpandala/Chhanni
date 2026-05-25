@@ -109,6 +109,15 @@ fn is_retryable(status: StatusCode) -> bool {
 }
 
 #[async_trait]
+impl crate::actions::undo::UndoMutations for GmailMutationsClient {
+    async fn untrash(&self, id: &str) -> SyncResult<()> {
+        let path = format!("/messages/{id}/untrash");
+        self.post_with_backoff(&path, &serde_json::json!({}))
+            .await
+    }
+}
+
+#[async_trait]
 impl GmailMutations for GmailMutationsClient {
     async fn batch_archive(&self, ids: &[String]) -> SyncResult<()> {
         // Gmail "archive" = remove INBOX label.

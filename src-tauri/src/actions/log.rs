@@ -1,4 +1,4 @@
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 use serde::Serialize;
 
 use crate::db::Db;
@@ -35,6 +35,9 @@ pub struct ActionLogEntry {
     pub outcome: String,
     pub error_message: Option<String>,
     pub executed_at: String,
+    pub prior_label_ids: Option<String>,
+    pub reversal_kind: Option<String>,
+    pub reversed_at: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -65,9 +68,37 @@ impl<'a> ActionsLogRepo<'a> {
         outcome: Outcome,
         error_message: Option<&str>,
     ) -> DbResult<usize> {
+        self.record_many_with_prior(
+            account_id,
+            staged_action_id,
+            cluster_key,
+            action_type,
+            provider_msg_ids,
+            outcome,
+            error_message,
+            &std::collections::HashMap::new(),
+        )
+    }
+
+    /// As `record_many`, but records the prior label_ids per message id and a
+    /// reversal kind, enabling Phase 7 undo. `prior_labels` maps
+    /// provider_msg_id → JSON array string.
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_many_with_prior(
+        &self,
+        account_id: &str,
+        staged_action_id: Option<i64>,
+        cluster_key: &str,
+        action_type: &str,
+        provider_msg_ids: &[String],
+        outcome: Outcome,
+        error_message: Option<&str>,
+        prior_labels: &std::collections::HashMap<String, String>,
+    ) -> DbResult<usize> {
         if provider_msg_ids.is_empty() {
             return Ok(0);
         }
+        let reversal_kind = reversal_for(action_type, outcome);
         self.db.with_connection(|conn| {
             let tx = conn.transaction().map_err(DbError::from)?;
             let mut count = 0usize;
@@ -76,11 +107,13 @@ impl<'a> ActionsLogRepo<'a> {
                     .prepare(
                         "INSERT INTO actions_log
                             (account_id, staged_action_id, cluster_key, provider_msg_id,
-                             action_type, outcome, error_message)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                             action_type, outcome, error_message,
+                             prior_label_ids, reversal_kind)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                     )
                     .map_err(DbError::from)?;
                 for id in provider_msg_ids {
+                    let prior = prior_labels.get(id);
                     stmt.execute(params![
                         account_id,
                         staged_action_id,
@@ -89,6 +122,8 @@ impl<'a> ActionsLogRepo<'a> {
                         action_type,
                         outcome.as_str(),
                         error_message,
+                        prior,
+                        reversal_kind,
                     ])
                     .map_err(DbError::from)?;
                     count += 1;
@@ -96,6 +131,95 @@ impl<'a> ActionsLogRepo<'a> {
             }
             tx.commit().map_err(DbError::from)?;
             Ok(count)
+        })
+    }
+
+    pub fn list_reversible(
+        &self,
+        account_id: &str,
+        limit: u32,
+    ) -> DbResult<Vec<ActionLogEntry>> {
+        self.db.with_connection(|conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, account_id, staged_action_id, cluster_key, provider_msg_id,
+                            action_type, outcome, error_message, executed_at,
+                            prior_label_ids, reversal_kind, reversed_at
+                     FROM actions_log
+                     WHERE account_id = ?1
+                       AND reversal_kind IS NOT NULL
+                       AND reversed_at IS NULL
+                       AND outcome = 'success'
+                     ORDER BY executed_at DESC, id DESC
+                     LIMIT ?2",
+                )
+                .map_err(DbError::from)?;
+            let rows = stmt
+                .query_map(params![account_id, limit as i64], |r| {
+                    Ok(ActionLogEntry {
+                        id: r.get(0)?,
+                        account_id: r.get(1)?,
+                        staged_action_id: r.get(2)?,
+                        cluster_key: r.get(3)?,
+                        provider_msg_id: r.get(4)?,
+                        action_type: r.get(5)?,
+                        outcome: r.get(6)?,
+                        error_message: r.get(7)?,
+                        executed_at: r.get(8)?,
+                        prior_label_ids: r.get(9)?,
+                        reversal_kind: r.get(10)?,
+                        reversed_at: r.get(11)?,
+                    })
+                })
+                .map_err(DbError::from)?;
+            let mut out = Vec::new();
+            for r in rows {
+                out.push(r.map_err(DbError::from)?);
+            }
+            Ok(out)
+        })
+    }
+
+    pub fn get(&self, id: i64) -> DbResult<Option<ActionLogEntry>> {
+        self.db.with_connection(|conn| {
+            conn.query_row(
+                "SELECT id, account_id, staged_action_id, cluster_key, provider_msg_id,
+                        action_type, outcome, error_message, executed_at,
+                        prior_label_ids, reversal_kind, reversed_at
+                 FROM actions_log WHERE id = ?1",
+                params![id],
+                |r| {
+                    Ok(ActionLogEntry {
+                        id: r.get(0)?,
+                        account_id: r.get(1)?,
+                        staged_action_id: r.get(2)?,
+                        cluster_key: r.get(3)?,
+                        provider_msg_id: r.get(4)?,
+                        action_type: r.get(5)?,
+                        outcome: r.get(6)?,
+                        error_message: r.get(7)?,
+                        executed_at: r.get(8)?,
+                        prior_label_ids: r.get(9)?,
+                        reversal_kind: r.get(10)?,
+                        reversed_at: r.get(11)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(DbError::from)
+        })
+    }
+
+    pub fn mark_reversed(&self, id: i64) -> DbResult<()> {
+        self.db.with_connection(|conn| {
+            conn.execute(
+                "UPDATE actions_log
+                 SET reversed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                 WHERE id = ?1",
+                params![id],
+            )
+            .map(|_| ())
+            .map_err(DbError::from)
         })
     }
 
@@ -137,7 +261,8 @@ impl<'a> ActionsLogRepo<'a> {
             let mut stmt = conn
                 .prepare(
                     "SELECT id, account_id, staged_action_id, cluster_key, provider_msg_id,
-                            action_type, outcome, error_message, executed_at
+                            action_type, outcome, error_message, executed_at,
+                            prior_label_ids, reversal_kind, reversed_at
                      FROM actions_log
                      WHERE account_id = ?1
                      ORDER BY executed_at DESC, id DESC
@@ -156,6 +281,9 @@ impl<'a> ActionsLogRepo<'a> {
                         outcome: r.get(6)?,
                         error_message: r.get(7)?,
                         executed_at: r.get(8)?,
+                        prior_label_ids: r.get(9)?,
+                        reversal_kind: r.get(10)?,
+                        reversed_at: r.get(11)?,
                     })
                 })
                 .map_err(DbError::from)?;
@@ -165,6 +293,18 @@ impl<'a> ActionsLogRepo<'a> {
             }
             Ok(out)
         })
+    }
+}
+
+fn reversal_for(action_type: &str, outcome: Outcome) -> Option<&'static str> {
+    if outcome != Outcome::Success {
+        return None;
+    }
+    match action_type {
+        "archive" => Some("restore_labels"),
+        "trash" => Some("untrash"),
+        "add_label" | "remove_label" | "mark_read" => Some("restore_labels"),
+        _ => None,
     }
 }
 

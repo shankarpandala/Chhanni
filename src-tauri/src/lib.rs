@@ -70,6 +70,9 @@ pub fn run() {
             commands::execute::cancel_executor,
             commands::execute::actions_log_counts,
             commands::execute::actions_log_recent,
+            commands::audit::list_reversible,
+            commands::audit::undo_action,
+            commands::audit::export_audit,
         ]);
 
     if let Err(err) = builder.run(tauri::generate_context!()) {

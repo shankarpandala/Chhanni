@@ -144,6 +144,15 @@ export interface ActionLogEntry {
   outcome: string;
   error_message: string | null;
   executed_at: string;
+  prior_label_ids: string | null;
+  reversal_kind: string | null;
+  reversed_at: string | null;
+}
+
+export interface AuditExport {
+  format: "json" | "csv";
+  content: string;
+  rows: number;
 }
 
 export const tauriApi = {
@@ -243,4 +252,17 @@ export const tauriApi = {
     listen<ExecuteProgress>("execute:progress", (event) =>
       handler(event.payload),
     ),
+
+  listReversible: (
+    accountId: string,
+    limit: number,
+  ): Promise<ActionLogEntry[]> =>
+    invoke<ActionLogEntry[]>("list_reversible", { accountId, limit }),
+  undoAction: (logId: number, accountId: string): Promise<void> =>
+    invoke<void>("undo_action", { logId, accountId }),
+  exportAudit: (
+    accountId: string,
+    format: "json" | "csv",
+  ): Promise<AuditExport> =>
+    invoke<AuditExport>("export_audit", { accountId, format }),
 };

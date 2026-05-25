@@ -5,9 +5,10 @@ import {
   type AccountSummary,
   type SyncProgress,
 } from "./lib/tauri";
+import { History } from "./History";
 import { Review } from "./Review";
 
-type View = "accounts" | "review";
+type View = "accounts" | "review" | "history";
 
 export function App(): JSX.Element {
   const [view, setView] = useState<View>("accounts");
@@ -25,7 +26,7 @@ export function App(): JSX.Element {
         </p>
       </header>
       <nav className="mt-6 flex gap-2 text-xs">
-        {(["accounts", "review"] as const).map((v) => (
+        {(["accounts", "review", "history"] as const).map((v) => (
           <button
             key={v}
             type="button"
@@ -42,8 +43,10 @@ export function App(): JSX.Element {
       </nav>
       {view === "accounts" ? (
         <ConnectPanel accountsQuery={accountsQuery} />
-      ) : (
+      ) : view === "review" ? (
         <Review accounts={accountsQuery.data ?? []} />
+      ) : (
+        <History accounts={accountsQuery.data ?? []} />
       )}
     </main>
   );

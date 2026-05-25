@@ -1,3 +1,4 @@
+pub mod audit;
 pub mod execute;
 pub mod gmail;
 pub mod pipeline;

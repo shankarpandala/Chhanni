@@ -378,3 +378,49 @@ User: "use the most recent and advanced models that fit in m5 pro 24 GB vram".
 
 **Next**
 - Phase 7 (audit + undo with 30-day reversal window). Continues next turn.
+
+---
+
+## 2026-05-25 — Phase 7: Audit + Undo (✅ shipped)
+
+**Shipped**
+- Migration `V010__audit`: extends `actions_log` with `prior_label_ids` (JSON), `reversal_kind`, `reversed_at`. Partial index on un-reversed reversible rows for fast UI listing.
+- Executor now snapshots `messages.label_ids` for every chunk **before** dispatching the mutation, in a single `WHERE provider_msg_id IN (...)` query. Stored alongside the outcome row so undo doesn't need an extra API round-trip.
+- `actions::undo`:
+  - `undo_one(mutator, undo_mutator, db, log_id)` resolves the entry, dispatches the inverse, marks `reversed_at`. Refuses double-undo, refuses to reverse non-`success` rows.
+  - `restore_labels` for archive/mark_read/add_label/remove_label — diff against `prior_label_ids` per action type (e.g. archive only re-adds `INBOX` if it was present).
+  - `untrash` for `trash` actions, **only within the 30-day SPEC window** (older entries return a clear error).
+  - `UndoMutations` trait on `GmailMutationsClient` exposes `/messages/{id}/untrash`.
+- Tauri commands `list_reversible`, `undo_action`, `export_audit` (CSV + JSON with proper escaping).
+- Frontend `History` view (third tab):
+  - Counts summary (success / failure / cancelled)
+  - List of un-reversed reversible actions with per-row Undo buttons
+  - Export CSV / Export JSON downloads via in-browser Blob
+
+**Tests** (+4 → 109 total)
+- `undo`:
+  - Undo of `archive` re-adds `INBOX` exactly when it was present in the prior label set; double-undo refused.
+  - Undo of `trash` calls `untrash` on the fake mutator with the right id.
+  - `diff_for("archive", …)` re-adds `INBOX` only when prior contained it.
+  - `list_reversible` filters out `failure` outcome rows.
+
+**Gate results**
+- `cargo check`, `cargo clippy --all-targets -- -D warnings`, `cargo test` (109 pass), `pnpm typecheck`, `pnpm build`, `pnpm lint` — all green.
+
+**Skipped / deferred**
+- Bulk undo (un-do an entire executor run with one click): UI shows per-row buttons today. Wrap in a "select all" affordance later — backlog.
+- Re-sync of local SQLite after undo: the next incremental sync naturally picks the provider's view back up. UI doesn't surface a "sync recommended" hint — backlog.
+- A persistent audit-export destination (drop into ~/Documents) — currently uses the browser Blob download path.
+
+**Surprises**
+- The original list_recent SQL didn't include the new columns and the impl's `}` ended up inside the file in the wrong spot after an aggressive multi-method add. Caught by `cargo check`; structure restored with the helper function placed outside the impl.
+- `clippy::await_holding_lock` fired on a test that held `parking_lot::Mutex` across `.await`. Real bug shape (cross-await locks are a real footgun), even in tests; fixed by scoping the lock into a block.
+- The reversal "restore_labels" path can't perfectly undo `add_label` / `remove_label` because we don't record which label was the operand, only the prior set. The action chips in Phase 5 don't expose those operations yet, so this is acceptable for now; tracked as a future per-label-aware variant in BACKLOG.
+
+**User actions before local smoke**
+1. Execute some staged actions (e.g. archive a promotional cluster).
+2. Switch to the **History** tab → click Undo on a row → verify the provider state reverts.
+3. Try Export CSV / JSON → file downloads with the expected rows.
+
+**Next**
+- Phase 8 (Outlook / Microsoft Graph parity). Continues next turn.
