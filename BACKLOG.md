@@ -20,3 +20,7 @@ Things discovered out of current phase scope. Do not silently implement.
 - **Threads + labels population** during sync (tables exist but unused).
 - **Sync scheduling** (background re-sync every N minutes, not just on-click).
 - **SQLite vacuum / WAL truncation** policy after large delete batches in Phase 6.
+- **Phase 3.5 — sidecar archive extraction**: the bootstrapper downloads the llama.cpp release zip; we still need to unzip + chmod + verify the inner binary, then launch it via `SidecarManager` automatically. Until then the UI exposes a port input.
+- **sqlite-vec** for ≥10⁵ messages or cross-account search.
+- **Embedding threshold tuner**: surface the 0.85 cosine threshold in a settings panel for real-mailbox tuning.
+- **Re-embed migrations** when `model_version` changes.

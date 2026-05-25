@@ -145,3 +145,61 @@ Append-only. One section per phase or significant milestone.
 
 **Next**
 - Phase 3 (embedding + clustering with bundled llama.cpp sidecar) is the next chunk. Larger lift: vendoring/building the sidecar binary, model downloads with resumable HTTP, `sqlite-vec` integration. Will start in the next turn unless interrupted.
+
+---
+
+## 2026-05-25 — Phase 3: Embedding + clustering (✅ shipped, real-binary smoke deferred)
+
+**Shipped**
+- `sidecar::download::download_resumable` — HTTP Range-based resumable downloader writing to a `.part` file, atomic rename on success, SHA-256 verification (running hasher seeded from existing partial bytes so a resumed download produces the same checksum as a fresh one). Returns the asset's checksum and supports an early-return when the destination already exists with the expected hash.
+- `sidecar::release` — pinned llama.cpp release tag (`b6240`), per-platform asset URL table (macOS arm64/x64, Linux x64, Windows x64). Model URL defaults to `nomic-embed-text-v1.5.Q8_0.gguf` on HuggingFace with `CHHANNI_EMBED_MODEL_URL` / `CHHANNI_EMBED_MODEL_SHA256` overrides for air-gapped installs.
+- `sidecar::lifecycle::SidecarManager::spawn` — tokio `Command` with stdout piped, scans for the "listening on … :NNNN" line within a 60 s startup window, returns an `Arc<SidecarHandle>` that kills the child on drop. Drains stderr in a background task and only logs lines containing "error" to keep PII out of logs.
+- `sidecar::client::HttpSidecarClient` — POSTs to `/embedding`, parses both flat and nested shapes, handles HTTP errors and empty embeddings as typed errors.
+- `Bootstrapper` — orchestrates the model download (the binary archive extraction is documented but stubbed; the frontend currently expects `llama-server` to be on the user's PATH or supplied via the in-app port field).
+- Migration `V006`: `embeddings(account_id, provider_msg_id, model_version, dim, embedding BLOB)` + `message_clusters(account_id, provider_msg_id, cluster_key, centroid_cosine)` with FK CASCADE.
+- `db::EmbeddingsRepo` — bulk upsert in a single transaction, `list_missing` for incremental embedding work, `messages.embedded_at` updated in the same tx.
+- `db::ClustersRepo` — bulk upsert + `list_summaries` that joins back to `messages` for the UI.
+- `pipeline::text::build_embedding_input` — deterministic concatenation `subject\nsender\nsnippet[..500 chars]`, char-bounded (not byte-bounded) so UTF-8 stays valid.
+- `pipeline::embed::embed_account` — drives the `EmbeddingClient` trait with bounded in-flight concurrency, dimension check, idempotent re-run.
+- `pipeline::cluster::cluster_account` — two-stage: sender bucket → greedy agglomerative on cosine ≥ 0.85 with a running-mean centroid; buckets below `min_split_size` short-circuit to a single cluster.
+- Tauri commands: `embed_bootstrap`, `embed_run`, `cluster_run`, `list_clusters`, `embedding_status`; UI surfaces them as Embed / Cluster buttons on each account card, with a sidecar-port input (default 8080) so the user can point at a manually-launched `llama-server` until the bootstrapper extracts the binary itself.
+
+**Tests** (33 new → 76 total)
+- Downloader: happy path with SHA verification (1), checksum-mismatch error (1), resume-from-existing-partial via wiremock with a Range matcher (1), existing-file short-circuit that asserts the network is not touched (1), progress callback invocation (1).
+- Sidecar lifecycle: parses port from current and legacy llama-server stdout lines (2), rejects unrelated lines (1), rejects port 0 (1), spawn errors when binary missing (1), `SidecarHandle::drop` actually kills the child process via /proc check (1, Linux-only).
+- Sidecar client: flat embedding parse (1), nested embedding parse (1), HTTP 5xx → typed error (1), empty embedding → typed error (1).
+- Release catalog: detect doesn't panic (1), all four supported platforms resolve (1), unsupported platform has no asset (1).
+- Embeddings repo: f32 ↔ BLOB round-trip preserves values (1), upsert + get + count (1), `list_missing` excludes already-embedded (1).
+- Embedding pipeline: deterministic embedder embeds all missing rows (1), re-run is a no-op (1), dimension mismatch surfaces typed error (1).
+- Text builder: empty inputs (1), char-not-byte truncation (1), whitespace trimming (1).
+- Clustering: cosine = 1 for identical vectors (1), cosine = 0 for orthogonal (1), small same-sender bucket becomes one cluster (1), large dissimilar same-sender bucket splits (1), different senders never share a cluster (1), unknown sender gets a synthetic UUID-keyed cluster (1).
+
+**Gate results**
+- `cargo check` ✅
+- `cargo clippy --all-targets -- -D warnings` ✅
+- `cargo test` ✅ (76 pass)
+- `pnpm typecheck` ✅
+- `pnpm build` ✅
+- `pnpm lint` ✅
+
+**Deliberately deferred (logged)**
+- **Archive extraction**: the bootstrapper downloads the GitHub release zip but does not yet unzip / chmod the inner binary. The UI exposes a "sidecar port" input so the user can run `llama-server -m <gguf> --port 8080 --embeddings` manually while we iterate. Tracked as a Phase 3.5 task in BACKLOG.
+- **`sqlite-vec`**: not adopted. At our scale brute-force cosine in Rust is microseconds; the extension's value is only at 10⁵+ vectors. Logged for the day we cross that threshold.
+- **Real model + real sidecar smoke test**: container is headless and offline-capped; downloading a 2.5 GB model + executing real llama.cpp is the user's local validation step.
+- **Embedding-quality validation**: the SPEC's "newsletters/receipts/notifications group sensibly" check requires a real mailbox and real embeddings. Sender-bucketing alone already gets us most of the way; the within-bucket threshold should be tuned on real data before locking in.
+
+**Surprises**
+- llama.cpp's stdout phrasing has drifted across versions ("server is listening on http://…", "HTTP server listening at localhost:…"); the port parser handles both and is the kind of thing that's worth a test rather than a hand-eyeballed regex.
+- `rusqlite::query_map` takes a `Params` trait object, not a `&[&dyn ToSql]`. Switched to `rusqlite::params_from_iter` with an owned `Vec<String>`.
+- The Drop test for `SidecarHandle` is Linux-`/proc`-specific. On macOS/Windows we'd assert via `Child::try_wait` instead; left as Linux-only for now since the CI surface is Linux.
+- `clippy::type_complexity` fired on a `BTreeMap<String, Vec<(String, Vec<f32>)>>` — extracted as `type SenderBuckets`.
+
+**User actions before local smoke**
+1. Phase 1 + Phase 2 prereqs still apply.
+2. Either download `llama-server` from `https://github.com/ggml-org/llama.cpp/releases/tag/b6240` manually OR install via your package manager.
+3. Fetch the embedding model: `curl -L -o ~/Library/Application\ Support/com.chhanni.chhanni/models/nomic-embed-text-v1.5.Q8_0.gguf https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/main/nomic-embed-text-v1.5.Q8_0.gguf` (or click "Bootstrap" in the UI once that's wired in 3.5).
+4. Launch the sidecar: `llama-server -m <path/to/gguf> --port 8080 --host 127.0.0.1 --embeddings`.
+5. In Chhanni, click **Embed** then **Cluster** on a synced account. Cluster list appears with sender + sample-subject + member count.
+
+**Next**
+- Phase 4 (classification with `gemma-3-4b-it` + JSON-grammar constraint) is the next chunk. Will continue in the next turn unless interrupted.

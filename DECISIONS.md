@@ -161,6 +161,33 @@ Append-only. One entry per non-trivial choice. Format:
 
 ---
 
+## 2026-05-25 — llama.cpp delivery: download prebuilt on first run
+
+**Context**: Phase 3 needs `llama-server` on the user's machine. Three options surveyed; user picked download-on-first-run.
+**Decision**: Pin a llama.cpp release tag in `sidecar::release::LLAMA_RELEASE_TAG`. On first run, fetch the per-platform archive into `<app_data>/chhanni/bin/<tag>/`, extract, then spawn with `--port 0 --host 127.0.0.1 --embeddings`. Phase 3 ships the downloader + lifecycle scaffolding; archive extraction lands in Phase 3.5 (BACKLOG).
+**Reasoning**: ~30 MB installer instead of ~200 MB; no C++ toolchain on dev machines; ships model upgrades trivially. Trade-off: needs network on first run (acceptable for a cloud-LLM-free desktop app — the connection happens once).
+**Reversibility**: easy (could switch to vendor+build at any time).
+
+---
+
+## 2026-05-25 — Embedding storage: plain BLOB, no sqlite-vec
+
+**Context**: Plan called for `sqlite-vec` to index embeddings.
+**Decision**: Store embeddings as little-endian f32 BLOBs in `embeddings(embedding BLOB)`. Brute-force cosine in Rust for clustering.
+**Reasoning**: At 5K-20K vectors × 768 dims × 4 bytes ≈ 15-60 MB the whole index fits in L3 and an unindexed cosine sweep is microseconds. `sqlite-vec` requires a custom rusqlite build + load_extension dance for tens of microseconds of speedup at our scale. Trade-off: if we ever cluster across multiple accounts at 10⁵+ messages we'll feel it.
+**Reversibility**: easy — `EmbeddingsRepo` is the only seam.
+
+---
+
+## 2026-05-25 — Clustering algorithm: sender bucket → greedy cosine agglomerative
+
+**Context**: SPEC §4 Phase 3 said "GROUP BY sender, then within sender group cosine > 0.85".
+**Decision**: Two-stage exactly as specced. Within-bucket pass is a single greedy walk with a running-mean centroid per cluster — no quadratic pairwise, no DBSCAN. Buckets below `min_split_size=4` short-circuit to a single cluster.
+**Reasoning**: Sender is the dominant signal; within-bucket variation is what we use the embedding for. Greedy + running centroid is O(N × K) where K is small (typically 1-3 sub-clusters per sender). Small buckets aren't worth splitting — keeps the cluster count tidy.
+**Reversibility**: easy.
+
+---
+
 ## 2026-05-25 — Icons: placeholder for now
 
 **Context**: Tauri's `generate_context!` requires icon paths to exist at compile time.

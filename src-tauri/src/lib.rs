@@ -12,7 +12,9 @@ pub mod auth;
 pub mod commands;
 pub mod db;
 pub mod error;
+pub mod pipeline;
 pub mod providers;
+pub mod sidecar;
 pub mod sync;
 
 use tracing::info;
@@ -47,6 +49,11 @@ pub fn run() {
             commands::gmail::gmail_list_accounts,
             commands::gmail::gmail_account_summaries,
             commands::gmail::gmail_sync,
+            commands::pipeline::embed_bootstrap,
+            commands::pipeline::embed_run,
+            commands::pipeline::cluster_run,
+            commands::pipeline::list_clusters,
+            commands::pipeline::embedding_status,
         ]);
 
     if let Err(err) = builder.run(tauri::generate_context!()) {

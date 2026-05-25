@@ -155,6 +155,108 @@ function AccountCard({ account }: AccountCardProps): JSX.Element {
           {sync.error instanceof Error ? sync.error.message : "Sync failed"}
         </p>
       ) : null}
+
+      <ClusterPanel accountId={account.account_id} />
     </li>
+  );
+}
+
+interface ClusterPanelProps {
+  accountId: string;
+}
+
+function ClusterPanel({ accountId }: ClusterPanelProps): JSX.Element {
+  const queryClient = useQueryClient();
+  const status = useQuery({
+    queryKey: ["embeddingStatus", accountId],
+    queryFn: () => tauriApi.embeddingStatus(accountId),
+  });
+  const clusters = useQuery({
+    queryKey: ["clusters", accountId],
+    queryFn: () => tauriApi.listClusters(accountId),
+  });
+
+  const [sidecarPort, setSidecarPort] = useState(() => {
+    const fromEnv = window.localStorage.getItem("chhanni:sidecarPort");
+    return fromEnv ? Number(fromEnv) : 8080;
+  });
+
+  useEffect(() => {
+    window.localStorage.setItem("chhanni:sidecarPort", String(sidecarPort));
+  }, [sidecarPort]);
+
+  const embed = useMutation({
+    mutationFn: () => tauriApi.embedRun(accountId, sidecarPort),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["embeddingStatus", accountId] });
+    },
+  });
+
+  const cluster = useMutation({
+    mutationFn: () => tauriApi.clusterRun(accountId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["clusters", accountId] });
+      void queryClient.invalidateQueries({ queryKey: ["embeddingStatus", accountId] });
+    },
+  });
+
+  return (
+    <div className="mt-3 border-t border-zinc-800 pt-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-xs text-zinc-500">
+          {status.data
+            ? `${status.data.embedded.toLocaleString()} / ${status.data.total.toLocaleString()} embedded · ${status.data.clusters} clusters`
+            : "—"}
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="number"
+            value={sidecarPort}
+            onChange={(e) => setSidecarPort(Number(e.target.value))}
+            className="w-20 rounded border border-zinc-800 bg-zinc-950 px-2 py-1 text-xs text-zinc-200"
+            title="llama-server port"
+          />
+          <button
+            type="button"
+            onClick={() => embed.mutate()}
+            disabled={embed.isPending}
+            className="rounded-md bg-zinc-800 px-3 py-1.5 text-xs font-medium text-zinc-100 transition hover:bg-zinc-700 disabled:opacity-50"
+          >
+            {embed.isPending ? "Embedding…" : "Embed"}
+          </button>
+          <button
+            type="button"
+            onClick={() => cluster.mutate()}
+            disabled={cluster.isPending}
+            className="rounded-md bg-zinc-800 px-3 py-1.5 text-xs font-medium text-zinc-100 transition hover:bg-zinc-700 disabled:opacity-50"
+          >
+            {cluster.isPending ? "Clustering…" : "Cluster"}
+          </button>
+        </div>
+      </div>
+
+      {embed.isError ? (
+        <p className="mt-2 text-xs text-red-400">
+          {embed.error instanceof Error ? embed.error.message : "Embedding failed"}
+        </p>
+      ) : null}
+
+      {clusters.data && clusters.data.length > 0 ? (
+        <ul className="mt-3 max-h-48 space-y-1 overflow-y-auto text-xs text-zinc-300">
+          {clusters.data.slice(0, 10).map((c) => (
+            <li key={c.cluster_key} className="flex items-center justify-between gap-3">
+              <span className="truncate">
+                {c.sample_sender ?? c.cluster_key} · {c.sample_subject ?? "(no subject)"}
+              </span>
+              <span className="shrink-0 text-zinc-500">{c.member_count}</span>
+            </li>
+          ))}
+          {clusters.data.length > 10 ? (
+            <li className="text-zinc-500">…and {clusters.data.length - 10} more</li>
+          ) : null}
+        </ul>
+      ) : null}
+
+    </div>
   );
 }

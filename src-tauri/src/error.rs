@@ -98,3 +98,49 @@ pub enum SyncError {
 }
 
 pub type SyncResult<T> = Result<T, SyncError>;
+
+#[derive(Debug, Error)]
+pub enum SidecarError {
+    #[error("io")]
+    Io(#[source] std::io::Error),
+
+    #[error("http: {0}")]
+    Http(#[source] reqwest::Error),
+
+    #[error("download returned http {status}")]
+    HttpStatus { status: u16 },
+
+    #[error("checksum mismatch (expected {expected}, got {actual})")]
+    ChecksumMismatch { expected: String, actual: String },
+
+    #[error("sidecar process failed to start: {0}")]
+    Spawn(String),
+
+    #[error("sidecar failed to advertise a port within {seconds}s")]
+    PortTimeout { seconds: u64 },
+
+    #[error("sidecar request failed: {0}")]
+    Request(String),
+
+    #[error("malformed sidecar response")]
+    Malformed(#[source] serde_json::Error),
+
+    #[error("no embedding returned")]
+    EmptyEmbedding,
+}
+
+pub type SidecarResult<T> = Result<T, SidecarError>;
+
+#[derive(Debug, Error)]
+pub enum PipelineError {
+    #[error("db: {0}")]
+    Db(#[from] DbError),
+
+    #[error("sidecar: {0}")]
+    Sidecar(#[from] SidecarError),
+
+    #[error("vector dimension mismatch: expected {expected}, got {actual}")]
+    DimensionMismatch { expected: usize, actual: usize },
+}
+
+pub type PipelineResult<T> = Result<T, PipelineError>;
