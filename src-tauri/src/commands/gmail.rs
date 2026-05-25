@@ -5,7 +5,8 @@ use serde::Serialize;
 use tauri::{Emitter, State};
 use tauri_plugin_opener::OpenerExt;
 
-use crate::auth::gmail::{connect_account, ensure_fresh_token, load_credentials};
+use crate::auth::config::{OAuthConfigRepo, OAuthProvider};
+use crate::auth::gmail::{connect_account, ensure_fresh_token};
 use crate::auth::keychain::Keychain;
 use crate::auth::token::{AccountRecord, TokenStore};
 use crate::db::{open_with_path, Db, MessagesRepo, SyncStateRepo};
@@ -23,6 +24,7 @@ pub struct ConnectAccountResult {
 #[derive(Clone)]
 pub struct AppState {
     pub token_store: TokenStore<Keychain>,
+    pub oauth_config: OAuthConfigRepo<Keychain>,
     pub http: reqwest::Client,
     pub db: Db,
 }
@@ -35,8 +37,10 @@ impl AppState {
             .build()?;
         let path = crate::db::connection::default_db_path()?;
         let db = open_with_path(&path)?;
+        let keychain = Arc::new(Keychain::new());
         Ok(Self {
-            token_store: TokenStore::new(Arc::new(Keychain::new())),
+            token_store: TokenStore::new(Arc::clone(&keychain)),
+            oauth_config: OAuthConfigRepo::new(keychain),
             http,
             db,
         })
@@ -48,7 +52,10 @@ pub async fn gmail_connect_account(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<ConnectAccountResult, String> {
-    let creds = load_credentials().map_err(stringify)?;
+    let creds = state
+        .oauth_config
+        .resolve(OAuthProvider::Gmail)
+        .map_err(stringify)?;
     let token_store = state.token_store.clone();
     let http = state.http.clone();
     let app_for_open = app.clone();
@@ -82,7 +89,10 @@ pub async fn graph_connect_account(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<ConnectAccountResult, String> {
-    let creds = crate::auth::graph::load_credentials().map_err(stringify)?;
+    let creds = state
+        .oauth_config
+        .resolve(OAuthProvider::Graph)
+        .map_err(stringify)?;
     let token_store = state.token_store.clone();
     let http = state.http.clone();
     let app_for_open = app.clone();
@@ -108,7 +118,10 @@ pub async fn graph_sync(
     state: State<'_, AppState>,
     account_id: String,
 ) -> Result<(), String> {
-    let creds = crate::auth::graph::load_credentials().map_err(stringify)?;
+    let creds = state
+        .oauth_config
+        .resolve(OAuthProvider::Graph)
+        .map_err(stringify)?;
     let token_store = state.token_store.clone();
     let http = state.http.clone();
     let db = state.db.clone();
@@ -205,7 +218,10 @@ pub async fn gmail_sync(
     state: State<'_, AppState>,
     account_id: String,
 ) -> Result<(), String> {
-    let creds = load_credentials().map_err(stringify)?;
+    let creds = state
+        .oauth_config
+        .resolve(OAuthProvider::Gmail)
+        .map_err(stringify)?;
     let token_store = state.token_store.clone();
     let http = state.http.clone();
     let db = state.db.clone();

@@ -57,14 +57,20 @@ pub async fn run_executor(
 
     let mutator: Arc<dyn GmailMutations> = match account.provider {
         Provider::Gmail => {
-            let creds = crate::auth::gmail::load_credentials().map_err(stringify)?;
+            let creds = state
+                .oauth_config
+                .resolve(crate::auth::config::OAuthProvider::Gmail)
+                .map_err(stringify)?;
             let token = crate::auth::gmail::ensure_fresh_token(&creds, &state.token_store, &account_id)
                 .await
                 .map_err(stringify)?;
             Arc::new(GmailMutationsClient::new(state.http.clone(), token.access_token))
         }
         Provider::Graph => {
-            let creds = crate::auth::graph::load_credentials().map_err(stringify)?;
+            let creds = state
+                .oauth_config
+                .resolve(crate::auth::config::OAuthProvider::Graph)
+                .map_err(stringify)?;
             let token = crate::auth::graph::ensure_fresh_token(&creds, &state.token_store, &account_id)
                 .await
                 .map_err(stringify)?;

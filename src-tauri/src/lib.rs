@@ -75,6 +75,9 @@ pub fn run() {
             commands::audit::list_reversible,
             commands::audit::undo_action,
             commands::audit::export_audit,
+            commands::settings::oauth_status,
+            commands::settings::set_oauth_credentials,
+            commands::settings::clear_oauth_credentials,
         ]);
 
     if let Err(err) = builder.run(tauri::generate_context!()) {

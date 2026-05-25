@@ -39,7 +39,10 @@ pub async fn undo_action(
 
     match account.provider {
         Provider::Gmail => {
-            let creds = crate::auth::gmail::load_credentials().map_err(stringify)?;
+            let creds = state
+                .oauth_config
+                .resolve(crate::auth::config::OAuthProvider::Gmail)
+                .map_err(stringify)?;
             let token = crate::auth::gmail::ensure_fresh_token(&creds, &state.token_store, &account_id)
                 .await
                 .map_err(stringify)?;
@@ -49,7 +52,10 @@ pub async fn undo_action(
             undo_one(&*m, &*u, &state.db, log_id).await
         }
         Provider::Graph => {
-            let creds = crate::auth::graph::load_credentials().map_err(stringify)?;
+            let creds = state
+                .oauth_config
+                .resolve(crate::auth::config::OAuthProvider::Graph)
+                .map_err(stringify)?;
             let token = crate::auth::graph::ensure_fresh_token(&creds, &state.token_store, &account_id)
                 .await
                 .map_err(stringify)?;
