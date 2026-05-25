@@ -155,6 +155,13 @@ export interface AuditExport {
   rows: number;
 }
 
+export interface OAuthStatus {
+  gmail_configured: boolean;
+  graph_configured: boolean;
+}
+
+export type OAuthProviderTag = "gmail" | "graph";
+
 export const tauriApi = {
   gmailConnectAccount: (): Promise<ConnectAccountResult> =>
     invoke<ConnectAccountResult>("gmail_connect_account"),
@@ -269,4 +276,26 @@ export const tauriApi = {
     format: "json" | "csv",
   ): Promise<AuditExport> =>
     invoke<AuditExport>("export_audit", { accountId, format }),
+
+  oauthStatus: (): Promise<OAuthStatus> => invoke<OAuthStatus>("oauth_status"),
+  setOAuthCredentials: (
+    provider: OAuthProviderTag,
+    clientId: string,
+    clientSecret: string | null,
+  ): Promise<void> =>
+    invoke<void>("set_oauth_credentials", {
+      input: { provider, client_id: clientId, client_secret: clientSecret },
+    }),
+  clearOAuthCredentials: (provider: OAuthProviderTag): Promise<void> =>
+    invoke<void>("clear_oauth_credentials", { provider }),
 };
+
+/// Tauri rejects `invoke()` with whatever the Rust command returned via
+/// `Err(String)`. TanStack Query then exposes that raw string as `.error`,
+/// which is **not** an `Error` instance. This helper normalises both cases
+/// so the UI can show the real reason rather than a generic fallback.
+export function errorMessage(err: unknown, fallback: string): string {
+  if (typeof err === "string") return err;
+  if (err instanceof Error) return err.message;
+  return fallback;
+}

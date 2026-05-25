@@ -7,8 +7,10 @@ import {
 } from "./lib/tauri";
 import { History } from "./History";
 import { Review } from "./Review";
+import { Settings } from "./Settings";
+import { errorMessage } from "./lib/tauri";
 
-type View = "accounts" | "review" | "history";
+type View = "accounts" | "review" | "history" | "settings";
 
 export function App(): JSX.Element {
   const [view, setView] = useState<View>("accounts");
@@ -26,7 +28,7 @@ export function App(): JSX.Element {
         </p>
       </header>
       <nav className="mt-6 flex gap-2 text-xs">
-        {(["accounts", "review", "history"] as const).map((v) => (
+        {(["accounts", "review", "history", "settings"] as const).map((v) => (
           <button
             key={v}
             type="button"
@@ -42,11 +44,13 @@ export function App(): JSX.Element {
         ))}
       </nav>
       {view === "accounts" ? (
-        <ConnectPanel accountsQuery={accountsQuery} />
+        <ConnectPanel accountsQuery={accountsQuery} onGoToSettings={() => setView("settings")} />
       ) : view === "review" ? (
         <Review accounts={accountsQuery.data ?? []} />
-      ) : (
+      ) : view === "history" ? (
         <History accounts={accountsQuery.data ?? []} />
+      ) : (
+        <Settings />
       )}
     </main>
   );
@@ -54,10 +58,15 @@ export function App(): JSX.Element {
 
 interface ConnectPanelProps {
   accountsQuery: ReturnType<typeof useQuery<AccountSummary[], Error>>;
+  onGoToSettings: () => void;
 }
 
-function ConnectPanel({ accountsQuery }: ConnectPanelProps): JSX.Element {
+function ConnectPanel({ accountsQuery, onGoToSettings }: ConnectPanelProps): JSX.Element {
   const queryClient = useQueryClient();
+  const oauthStatus = useQuery({
+    queryKey: ["oauthStatus"],
+    queryFn: tauriApi.oauthStatus,
+  });
 
   const connectGmail = useMutation({
     mutationFn: tauriApi.gmailConnectAccount,
@@ -86,7 +95,12 @@ function ConnectPanel({ accountsQuery }: ConnectPanelProps): JSX.Element {
           <button
             type="button"
             onClick={() => connectGmail.mutate()}
-            disabled={connectGmail.isPending}
+            disabled={connectGmail.isPending || !(oauthStatus.data?.gmail_configured ?? false)}
+            title={
+              oauthStatus.data?.gmail_configured
+                ? "Begin Gmail OAuth"
+                : "Add a Gmail client ID in Settings first"
+            }
             className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {connectGmail.isPending ? "Waiting…" : "Connect Gmail"}
@@ -94,7 +108,12 @@ function ConnectPanel({ accountsQuery }: ConnectPanelProps): JSX.Element {
           <button
             type="button"
             onClick={() => connectOutlook.mutate()}
-            disabled={connectOutlook.isPending}
+            disabled={connectOutlook.isPending || !(oauthStatus.data?.graph_configured ?? false)}
+            title={
+              oauthStatus.data?.graph_configured
+                ? "Begin Microsoft OAuth"
+                : "Add an Outlook client ID in Settings first"
+            }
             className="rounded-md bg-sky-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {connectOutlook.isPending ? "Waiting…" : "Connect Outlook"}
@@ -102,18 +121,32 @@ function ConnectPanel({ accountsQuery }: ConnectPanelProps): JSX.Element {
         </div>
       </div>
 
+      {oauthStatus.data &&
+      !oauthStatus.data.gmail_configured &&
+      !oauthStatus.data.graph_configured ? (
+        <div className="mt-3 rounded border border-amber-700/40 bg-amber-950/40 p-3 text-xs text-amber-200">
+          <p>
+            No OAuth credentials configured yet. Open{" "}
+            <button
+              type="button"
+              onClick={onGoToSettings}
+              className="underline hover:text-amber-100"
+            >
+              Settings
+            </button>{" "}
+            to add a Gmail or Outlook client ID.
+          </p>
+        </div>
+      ) : null}
+
       {connectGmail.isError ? (
         <p className="mt-3 text-xs text-red-400">
-          {connectGmail.error instanceof Error
-            ? connectGmail.error.message
-            : "Gmail connection failed"}
+          {errorMessage(connectGmail.error, "Gmail connection failed")}
         </p>
       ) : null}
       {connectOutlook.isError ? (
         <p className="mt-3 text-xs text-red-400">
-          {connectOutlook.error instanceof Error
-            ? connectOutlook.error.message
-            : "Outlook connection failed"}
+          {errorMessage(connectOutlook.error, "Outlook connection failed")}
         </p>
       ) : null}
 

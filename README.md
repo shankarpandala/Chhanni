@@ -84,27 +84,11 @@ Required scopes (Chhanni requests these — no manual configuration needed):
 
 Public Desktop apps do **not** need a client secret. Leave `GRAPH_CLIENT_SECRET` blank.
 
-## Configure secrets
+## Configure OAuth credentials
 
-Copy `.env.example` to `.env` at the repo root and fill in the values:
+Open Chhanni, switch to the **Settings** tab, and paste the client ID (and secret if you have one) for each provider you want to use. They're persisted to your OS keychain — you do this once per machine. The Connect buttons on the Accounts tab unlock as soon as credentials exist.
 
-```bash
-cp .env.example .env
-```
-
-```dotenv
-GMAIL_CLIENT_ID=your-google-client-id.apps.googleusercontent.com
-GMAIL_CLIENT_SECRET=optional-google-client-secret
-
-GRAPH_CLIENT_ID=00000000-0000-0000-0000-000000000000
-# GRAPH_CLIENT_SECRET intentionally left blank (public client)
-```
-
-Chhanni reads these from the parent shell's environment. There is no `.env` autoloader yet — export them before launching:
-
-```bash
-export $(grep -v '^#' .env | xargs)
-```
+If you prefer to wire things up via the shell for scripted dev workflows, the env vars `GMAIL_CLIENT_ID` / `GMAIL_CLIENT_SECRET` / `GRAPH_CLIENT_ID` / `GRAPH_CLIENT_SECRET` are read as a fallback when nothing is in the keychain (`.env.example` shows the layout).
 
 ## Build
 
