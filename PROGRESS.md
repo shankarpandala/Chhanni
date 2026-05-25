@@ -203,3 +203,75 @@ Append-only. One section per phase or significant milestone.
 
 **Next**
 - Phase 4 (classification with `gemma-3-4b-it` + JSON-grammar constraint) is the next chunk. Will continue in the next turn unless interrupted.
+
+---
+
+## 2026-05-25 — Model pins bumped to current SOTA
+
+User requested "use the latest models as much as possible" between phase 3 and phase 4. Updated three pins before starting Phase 4:
+
+- **llama.cpp** `b6240` → `b9310` (2026-05-25 release; matches today's date)
+- **Embedding model** `nomic-embed-text-v1.5` Q8_0 → **`nomic-embed-text-v2-moe`** Q8_0 (512 MB; MoE; 768-dim Matryoshka; multilingual; 8192-token context)
+- **Classifier model** SPEC's pinned `gemma-3-4b-it` → **`Qwen3-4B-Instruct-2507`** Q4_K_M (~2.5 GB; Qwen's Jul 2025 release; current SOTA in 4B class; stronger JSON-schema following than Gemma 3; broader multilingual coverage). All settings env-overridable via `CHHANNI_EMBED_MODEL_URL`, `CHHANNI_CLASSIFIER_MODEL_URL`, `CHHANNI_CLASSIFIER_MODEL_SHA256` etc.
+
+Logged in `DECISIONS.md`. SPEC.md not edited (it documents the original product brief); decision log is the canonical record of the bump.
+
+---
+
+## 2026-05-25 — Phase 4: Classification with Qwen3-4B + JSON-schema constraint (✅ shipped, real-model smoke deferred)
+
+**Shipped**
+- Sidecar:
+  - `CompletionClient` trait added alongside `EmbeddingClient`. `HttpSidecarClient::complete_json` POSTs to `/completion` with `json_schema` so the server constrains decoding to valid JSON; temperature 0.0, `cache_prompt: true` for speed across same-cluster requests, 120 s timeout.
+  - `Bootstrapper::ensure_classifier_model` mirrors the embedding model path. New `classifier_bootstrap` Tauri command + `classifier:bootstrap` event.
+- Storage:
+  - Migration `V007__classifications`: `cluster_classifications(account_id, cluster_key, category, confidence, reason, model_version, prompt_version, cluster_signature)` + two new columns on `messages` (`category`, `classified_confidence`).
+  - `ClassificationsRepo::upsert_and_propagate` writes the classification AND mirrors `(category, confidence)` to every member of the cluster in one transaction.
+- Pipeline:
+  - `pipeline::classify::classify_account` orchestrator: loads clusters with members in one query, picks top-N representatives by `centroid_cosine` (tie-break newest first), computes a stable SHA-256 `cluster_signature` from sorted member ids, skips re-classification when `(signature, model_version, prompt_version)` is unchanged.
+  - JSON-schema (`category_schema()`) enumerates the 9 SPEC categories + `unknown`, requires `confidence ∈ [0,1]`, max-120-char `reason`. Pushed to llama.cpp so the model literally cannot emit out-of-schema tokens.
+  - `CONFIDENCE_FLOOR = 0.6` per DECISIONS.md — anything below is stored as `unknown` (`category` is overridden, confidence is preserved for analytics).
+  - Malformed model output (e.g. a string with no JSON) doesn't error the run — it stores `Unknown` with `reason="parse: <err>"` and moves on. Same fallback for a sidecar HTTP failure on a single cluster.
+- Frontend:
+  - Two port inputs (embed + classify) so the user can run two `llama-server` instances on different ports with different models, until 3.5 wires up automatic spawning.
+  - "Classify" button per account; live category breakdown rendered as chips under the action bar.
+
+**Tests** (9 new → 94 total)
+- `parse_and_normalise`: handles ```` ```json ```` code-fence wrapping.
+- `category_schema`: contains all 9 enum values.
+- `ClassificationsRepo`: upsert propagates to cluster members only (assert sibling cluster untouched); `get` returns None when missing; category enum round-trip including the garbage-falls-to-unknown case.
+- `classify_account` end-to-end with a `ScriptedCompleter`:
+  - 2 clusters classified, both message categories propagated to the messages table.
+  - Re-run is a no-op (scripted completer asserts zero additional calls).
+  - Low confidence (0.42 < 0.6) collapses to `unknown` even though the schema-valid `category` was `newsletter`.
+  - Malformed JSON output stores `unknown` without erroring the run.
+
+**Gate results**
+- `cargo check` ✅
+- `cargo clippy --all-targets -- -D warnings` ✅
+- `cargo test` ✅ (94 pass — 9 new in classify/classifications)
+- `pnpm typecheck` ✅
+- `pnpm build` ✅
+- `pnpm lint` ✅
+
+**Skipped / deferred**
+- **Sidecar archive extraction + dual-model auto-launch** is still Phase 3.5. The current UX needs the user to start `llama-server -m <embed> --port 8080 --embeddings` and `llama-server -m <classifier> --port 8081` themselves.
+- **Real classifier smoke test** (Qwen3-4B against a real mailbox) requires the user's machine + the 2.5 GB GGUF.
+- **Confidence threshold tuning**: 0.6 is the starting point. SPEC says >90% correct categories in manual review — we can't validate that here.
+- **Few-shot examples** in the prompt: deliberately omitted. The schema constraint + Qwen3's strong instruction following should be enough at 4B. Re-evaluate if accuracy is below the SPEC target on real data.
+
+**Surprises**
+- `clippy::type_complexity` fired on a 7-tuple `Row` and a 6-tuple `Member` from the `JOIN messages + message_clusters` query — extracted as `type` aliases.
+- llama.cpp's `/completion` endpoint accepts a `json_schema` field directly (no need for the raw GBNF grammar dance the older docs recommend). Sticking with `/completion` (not `/v1/chat/completions`) keeps the request shape simple and the `prompt` field gives us full control over the formatting.
+- The `cache_prompt: true` flag is important — many clusters share the same prompt prefix (the schema description); enabling KV-cache reuse should give roughly 5-10× throughput vs the naive case on real hardware.
+
+**User actions before local smoke**
+1. Phases 0-3 prereqs apply.
+2. Fetch the classifier model: `curl -L -o ~/Library/Application\ Support/com.chhanni.chhanni/models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/main/Qwen3-4B-Instruct-2507-Q4_K_M.gguf` (or click classifier bootstrap when 3.5 lands).
+3. Run two sidecars on different ports:
+   - `llama-server -m <embed.gguf> --port 8080 --host 127.0.0.1 --embeddings`
+   - `llama-server -m <Qwen3-4B-Instruct-2507-Q4_K_M.gguf> --port 8081 --host 127.0.0.1`
+4. In Chhanni, click Embed → Cluster → Classify on a synced account. Category chips should appear; messages get `category` populated.
+
+**Next**
+- Phase 5 (review queue UI with rule-based proposed actions). Continues next turn.

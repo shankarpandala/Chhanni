@@ -3,8 +3,11 @@ use std::sync::Arc;
 use tauri::{Emitter, State};
 
 use crate::commands::gmail::AppState;
-use crate::db::{ClusterSummary, ClustersRepo, EmbeddingsRepo};
-use crate::pipeline::{cluster_account, embed_account, ClusterConfig, EmbedConfig, EmbedProgress};
+use crate::db::{ClassificationsRepo, ClusterSummary, ClustersRepo, EmbeddingsRepo};
+use crate::pipeline::{
+    classify_account, cluster_account, embed_account, ClassifyConfig, ClassifyProgress,
+    ClusterConfig, EmbedConfig, EmbedProgress,
+};
 use crate::sidecar::{Bootstrapper, BootstrapProgress, HttpSidecarClient};
 
 fn stringify<E: std::fmt::Display>(e: E) -> String {
@@ -22,7 +25,22 @@ pub async fn embed_bootstrap(
     let sink = crate::sidecar::bootstrap::map_sink(Arc::new(move |p: BootstrapProgress| {
         let _ = app_for_emit.emit("embed:bootstrap", p);
     }));
-    let path = boot.ensure_model(sink).await.map_err(stringify)?;
+    let path = boot.ensure_embedding_model(sink).await.map_err(stringify)?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+pub async fn classifier_bootstrap(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let data_dir = data_dir_for_app().map_err(stringify)?;
+    let boot = Bootstrapper::new(state.http.clone(), data_dir);
+    let app_for_emit = app.clone();
+    let sink = crate::sidecar::bootstrap::map_sink(Arc::new(move |p: BootstrapProgress| {
+        let _ = app_for_emit.emit("classifier:bootstrap", p);
+    }));
+    let path = boot.ensure_classifier_model(sink).await.map_err(stringify)?;
     Ok(path.to_string_lossy().into_owned())
 }
 
@@ -65,6 +83,79 @@ pub fn list_clusters(
 ) -> Result<Vec<ClusterSummary>, String> {
     ClustersRepo::new(&state.db)
         .list_summaries(&account_id)
+        .map_err(stringify)
+}
+
+#[tauri::command]
+pub async fn classify_run(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    account_id: String,
+    classifier_port: u16,
+) -> Result<u64, String> {
+    let client = HttpSidecarClient::new(state.http.clone(), classifier_port);
+    let app_for_emit = app.clone();
+    let sink: crate::pipeline::classify::ClassifySink =
+        Arc::new(move |p: &ClassifyProgress| {
+            let _ = app_for_emit.emit("classify:progress", p.clone());
+        });
+    let n = classify_account(
+        Arc::new(client),
+        state.db.clone(),
+        &account_id,
+        ClassifyConfig::default(),
+        sink,
+    )
+    .await
+    .map_err(stringify)?;
+    Ok(n)
+}
+
+#[derive(serde::Serialize)]
+pub struct CategoryBucket {
+    pub category: String,
+    pub count: i64,
+}
+
+#[tauri::command]
+pub fn classification_summary(
+    state: State<'_, AppState>,
+    account_id: String,
+) -> Result<Vec<CategoryBucket>, String> {
+    state
+        .db
+        .with_connection(|conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT COALESCE(category, 'unclassified') AS c, COUNT(*) AS n
+                     FROM messages WHERE account_id = ?1
+                     GROUP BY c ORDER BY n DESC",
+                )
+                .map_err(crate::error::DbError::from)?;
+            let rows = stmt
+                .query_map([&account_id], |r| {
+                    Ok(CategoryBucket {
+                        category: r.get::<_, String>(0)?,
+                        count: r.get::<_, i64>(1)?,
+                    })
+                })
+                .map_err(crate::error::DbError::from)?;
+            let mut out = Vec::new();
+            for r in rows {
+                out.push(r.map_err(crate::error::DbError::from)?);
+            }
+            Ok(out)
+        })
+        .map_err(stringify)
+}
+
+#[tauri::command]
+pub fn classification_count(
+    state: State<'_, AppState>,
+    account_id: String,
+) -> Result<i64, String> {
+    ClassificationsRepo::new(&state.db)
+        .count(&account_id)
         .map_err(stringify)
 }
 

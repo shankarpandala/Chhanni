@@ -12,6 +12,20 @@ pub trait EmbeddingClient: Send + Sync {
     async fn embed(&self, text: &str) -> SidecarResult<Vec<f32>>;
 }
 
+/// What the classification pipeline asks for. Same trait pattern; a separate
+/// trait so the embedding sidecar and classifier sidecar can live as two
+/// distinct processes on two ports.
+#[async_trait]
+pub trait CompletionClient: Send + Sync {
+    /// Send a single user prompt + a JSON-schema constraint, get back the
+    /// raw model output (which should be parseable JSON matching the schema).
+    async fn complete_json(
+        &self,
+        prompt: &str,
+        schema: &serde_json::Value,
+    ) -> SidecarResult<String>;
+}
+
 /// HTTP client for the llama.cpp `/embedding` (and `/v1/embeddings`) endpoint.
 #[derive(Clone)]
 pub struct HttpSidecarClient {
@@ -65,6 +79,57 @@ struct EmbedRequest<'a> {
 enum EmbedResponse {
     Flat { embedding: Vec<f32> },
     Nested { embedding: Vec<Vec<f32>> },
+}
+
+#[derive(Serialize)]
+struct CompletionRequest<'a> {
+    prompt: &'a str,
+    n_predict: i32,
+    temperature: f32,
+    cache_prompt: bool,
+    json_schema: &'a serde_json::Value,
+}
+
+#[derive(Deserialize)]
+struct CompletionResponse {
+    content: String,
+}
+
+#[async_trait]
+impl CompletionClient for HttpSidecarClient {
+    async fn complete_json(
+        &self,
+        prompt: &str,
+        schema: &serde_json::Value,
+    ) -> SidecarResult<String> {
+        let url = format!("{}/completion", self.base_url);
+        let body = CompletionRequest {
+            prompt,
+            n_predict: 256,
+            temperature: 0.0,
+            cache_prompt: true,
+            json_schema: schema,
+        };
+        let resp = self
+            .http
+            .post(&url)
+            .json(&body)
+            .timeout(Duration::from_secs(120))
+            .send()
+            .await
+            .map_err(SidecarError::Http)?;
+        if !resp.status().is_success() {
+            return Err(SidecarError::HttpStatus {
+                status: resp.status().as_u16(),
+            });
+        }
+        let parsed: CompletionResponse = resp.json().await.map_err(SidecarError::Http)?;
+        let trimmed = parsed.content.trim().to_owned();
+        if trimmed.is_empty() {
+            return Err(SidecarError::Request("empty completion".to_owned()));
+        }
+        Ok(trimmed)
+    }
 }
 
 #[async_trait]

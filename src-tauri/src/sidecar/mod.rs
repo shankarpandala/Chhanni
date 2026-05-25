@@ -5,6 +5,6 @@ pub mod lifecycle;
 pub mod release;
 
 pub use bootstrap::{Bootstrapper, BootstrapProgress};
-pub use client::{EmbeddingClient, HttpSidecarClient};
+pub use client::{CompletionClient, EmbeddingClient, HttpSidecarClient};
 pub use download::{download_resumable, DownloadProgress, DownloadSpec};
 pub use lifecycle::{SidecarHandle, SidecarManager, SidecarSpec};

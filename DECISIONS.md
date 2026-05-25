@@ -188,6 +188,36 @@ Append-only. One entry per non-trivial choice. Format:
 
 ---
 
+## 2026-05-25 — Bump model pins to current SOTA (user request)
+
+**Context**: User asked "use the latest models as much as possible" between Phase 3 and Phase 4. Web-checked current state.
+**Decision**:
+- llama.cpp release tag → `b9310` (today's release, 2026-05-25)
+- Embedding model → `nomic-embed-text-v2-moe.Q8_0.gguf` (was v1.5). 512 MB GGUF; MoE; 768-dim Matryoshka output; multilingual; 8192-token context.
+- Classifier model → `Qwen3-4B-Instruct-2507-Q4_K_M.gguf` (was Gemma 3 4B IT). ~2.5 GB; July 2025 release; current SOTA in the 4B instruction-tuned class.
+**Reasoning**: Qwen3-4B beats Gemma 3 4B on JSON-schema following benchmarks (we lean on this heavily in Phase 4); multilingual is a genuine bonus for mailboxes that mix English with the user's native language; the size envelope is the same. Nomic v2-MoE doubles down on Nomic v1.5's strengths (Matryoshka, long context) while adding multilingual coverage and slightly better MTEB scores at the same on-disk size. All choices remain env-overridable per asset.
+**Reversibility**: easy — `release.rs` is the only seam.
+
+---
+
+## 2026-05-25 — Classification: `/completion` with `json_schema`, not `/v1/chat/completions`
+
+**Context**: Two ways to constrain decoding in llama.cpp: GBNF grammar via `/completion` `grammar` field, or a JSON-schema field on the same endpoint (added in late 2024). OpenAI-compatible `/v1/chat/completions` also exists but has more shape variance across versions.
+**Decision**: Stay on `/completion` with `prompt` + `json_schema`. Set `cache_prompt: true` and `temperature: 0.0`.
+**Reasoning**: `prompt` gives us full control over formatting (no chat template surprises across model families). `json_schema` is conceptually cleaner than hand-rolled GBNF and is what every modern llama.cpp build supports. `cache_prompt` is essential: many clusters share the long system-y prefix; KV-cache reuse is ~5-10× on real hardware.
+**Reversibility**: easy.
+
+---
+
+## 2026-05-25 — Classification idempotence via cluster signature
+
+**Context**: Re-running classification should be a no-op unless something materially changed.
+**Decision**: A cluster's "signature" is `SHA-256(cluster_key || '|' || sorted_member_ids)`. Stored alongside each classification. We re-classify only when `(signature, model_version, prompt_version)` differs from what's persisted.
+**Reasoning**: Membership change → new signature → re-classify. Sample text changes (subject edits, snippet refreshes from a re-sync) are absorbed because the cluster's _membership_ didn't change. Model/prompt bumps invalidate everything cleanly. Cheap to compute and tiny on disk.
+**Reversibility**: easy.
+
+---
+
 ## 2026-05-25 — Icons: placeholder for now
 
 **Context**: Tauri's `generate_context!` requires icon paths to exist at compile time.

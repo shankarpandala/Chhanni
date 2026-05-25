@@ -24,3 +24,6 @@ Things discovered out of current phase scope. Do not silently implement.
 - **sqlite-vec** for ≥10⁵ messages or cross-account search.
 - **Embedding threshold tuner**: surface the 0.85 cosine threshold in a settings panel for real-mailbox tuning.
 - **Re-embed migrations** when `model_version` changes.
+- **Few-shot examples in the classifier prompt** if real-world accuracy is below the SPEC's 90 % bar.
+- **Per-language category routing** — the multilingual embedding/classifier choice opens this door; defer until we see a non-English mailbox in the wild.
+- **Stop using two `llama-server` processes**: one process can load multiple models since b8xxx; revisit when 3.5 lands.

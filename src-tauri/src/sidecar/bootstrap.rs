@@ -13,7 +13,7 @@ use serde::Serialize;
 use crate::error::SidecarResult;
 use crate::sidecar::download::{download_resumable, DownloadSink, DownloadSpec};
 use crate::sidecar::release::{
-    asset_for, binary_filename, embedding_model, install_root_in, HostPlatform,
+    asset_for, binary_filename, classifier_model, embedding_model, install_root_in, HostPlatform,
 };
 
 #[derive(Clone, Debug, Serialize)]
@@ -44,11 +44,24 @@ impl Bootstrapper {
         Some(BootstrapPaths { binary, model })
     }
 
-    /// Download the model only (the sidecar binary lives behind an archive
-    /// extraction step that we run separately on macOS/Linux/Windows).
-    /// Idempotent.
-    pub async fn ensure_model(&self, sink: DownloadSink) -> SidecarResult<PathBuf> {
+    /// Download the embedding model. Idempotent (returns immediately if the
+    /// destination already matches the expected checksum).
+    pub async fn ensure_embedding_model(&self, sink: DownloadSink) -> SidecarResult<PathBuf> {
         let asset = embedding_model();
+        self.ensure_model_asset(asset, sink).await
+    }
+
+    /// Download the classifier model. Same semantics.
+    pub async fn ensure_classifier_model(&self, sink: DownloadSink) -> SidecarResult<PathBuf> {
+        let asset = classifier_model();
+        self.ensure_model_asset(asset, sink).await
+    }
+
+    async fn ensure_model_asset(
+        &self,
+        asset: crate::sidecar::release::ModelAsset,
+        sink: DownloadSink,
+    ) -> SidecarResult<PathBuf> {
         let dest = self.data_dir.join("models").join(&asset.local_filename);
         let spec = DownloadSpec {
             url: asset.url,

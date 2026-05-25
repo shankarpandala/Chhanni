@@ -50,10 +50,14 @@ pub fn run() {
             commands::gmail::gmail_account_summaries,
             commands::gmail::gmail_sync,
             commands::pipeline::embed_bootstrap,
+            commands::pipeline::classifier_bootstrap,
             commands::pipeline::embed_run,
             commands::pipeline::cluster_run,
+            commands::pipeline::classify_run,
             commands::pipeline::list_clusters,
             commands::pipeline::embedding_status,
+            commands::pipeline::classification_summary,
+            commands::pipeline::classification_count,
         ]);
 
     if let Err(err) = builder.run(tauri::generate_context!()) {

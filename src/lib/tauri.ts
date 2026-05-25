@@ -56,6 +56,19 @@ export interface BootstrapProgress {
   bytes_total: number | null;
 }
 
+export interface ClassifyProgress {
+  account_id: string;
+  processed: number;
+  remaining: number;
+  skipped_unchanged: number;
+  elapsed_ms: number;
+}
+
+export interface CategoryBucket {
+  category: string;
+  count: number;
+}
+
 export const tauriApi = {
   gmailConnectAccount: (): Promise<ConnectAccountResult> =>
     invoke<ConnectAccountResult>("gmail_connect_account"),
@@ -69,19 +82,32 @@ export const tauriApi = {
     listen<SyncProgress>("sync:progress", (event) => handler(event.payload)),
 
   embedBootstrap: (): Promise<string> => invoke<string>("embed_bootstrap"),
+  classifierBootstrap: (): Promise<string> => invoke<string>("classifier_bootstrap"),
   embedRun: (accountId: string, sidecarPort: number): Promise<number> =>
     invoke<number>("embed_run", { accountId, sidecarPort }),
   clusterRun: (accountId: string): Promise<number> =>
     invoke<number>("cluster_run", { accountId }),
+  classifyRun: (accountId: string, classifierPort: number): Promise<number> =>
+    invoke<number>("classify_run", { accountId, classifierPort }),
   listClusters: (accountId: string): Promise<ClusterSummary[]> =>
     invoke<ClusterSummary[]>("list_clusters", { accountId }),
   embeddingStatus: (accountId: string): Promise<EmbeddingStatus> =>
     invoke<EmbeddingStatus>("embedding_status", { accountId }),
+  classificationSummary: (accountId: string): Promise<CategoryBucket[]> =>
+    invoke<CategoryBucket[]>("classification_summary", { accountId }),
+  classificationCount: (accountId: string): Promise<number> =>
+    invoke<number>("classification_count", { accountId }),
 
   onEmbedProgress: (
     handler: (p: EmbedProgress) => void,
   ): Promise<UnlistenFn> =>
     listen<EmbedProgress>("embed:progress", (event) => handler(event.payload)),
+  onClassifyProgress: (
+    handler: (p: ClassifyProgress) => void,
+  ): Promise<UnlistenFn> =>
+    listen<ClassifyProgress>("classify:progress", (event) =>
+      handler(event.payload),
+    ),
   onBootstrapProgress: (
     handler: (p: BootstrapProgress) => void,
   ): Promise<UnlistenFn> =>

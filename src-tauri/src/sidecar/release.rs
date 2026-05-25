@@ -7,7 +7,8 @@
 use std::path::PathBuf;
 
 /// llama.cpp release tag we pin against. Bumped manually after smoke-testing.
-pub const LLAMA_RELEASE_TAG: &str = "b6240";
+/// Current pin: 2026-05-25 release.
+pub const LLAMA_RELEASE_TAG: &str = "b9310";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LlamaAsset {
@@ -83,15 +84,36 @@ pub struct ModelAsset {
     pub local_filename: String,
 }
 
+/// Default embedding model: `nomic-embed-text-v2-moe` Q8_0.
+/// 512 MB GGUF, 768-dim Matryoshka output, multilingual, 8192-token context.
+/// Supersedes v1.5 (newer architecture, similar latency, broader language coverage).
 pub fn embedding_model() -> ModelAsset {
     let url = std::env::var("CHHANNI_EMBED_MODEL_URL").unwrap_or_else(|_| {
-        "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/main/nomic-embed-text-v1.5.Q8_0.gguf"
+        "https://huggingface.co/nomic-ai/nomic-embed-text-v2-moe-GGUF/resolve/main/nomic-embed-text-v2-moe.Q8_0.gguf"
             .to_owned()
     });
     ModelAsset {
         url,
         sha256: std::env::var("CHHANNI_EMBED_MODEL_SHA256").ok(),
-        local_filename: "nomic-embed-text-v1.5.Q8_0.gguf".to_owned(),
+        local_filename: "nomic-embed-text-v2-moe.Q8_0.gguf".to_owned(),
+    }
+}
+
+/// Default classifier / reasoner model: `Qwen3-4B-Instruct-2507` Q4_K_M.
+/// ~2.5 GB GGUF. Selected over Gemma 3 4B for stronger JSON-schema following
+/// and broader multilingual coverage (important for email mailboxes that mix
+/// English with the user's native language). Quantization is Q4_K_M because
+/// classification doesn't need Q5+ headroom; Q4_K_M leaves ~22 GB free on
+/// the 24 GB target machine for the OS, browser, and Tauri runtime.
+pub fn classifier_model() -> ModelAsset {
+    let url = std::env::var("CHHANNI_CLASSIFIER_MODEL_URL").unwrap_or_else(|_| {
+        "https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/main/Qwen3-4B-Instruct-2507-Q4_K_M.gguf"
+            .to_owned()
+    });
+    ModelAsset {
+        url,
+        sha256: std::env::var("CHHANNI_CLASSIFIER_MODEL_SHA256").ok(),
+        local_filename: "Qwen3-4B-Instruct-2507-Q4_K_M.gguf".to_owned(),
     }
 }
 

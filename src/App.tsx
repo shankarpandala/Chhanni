@@ -177,13 +177,25 @@ function ClusterPanel({ accountId }: ClusterPanelProps): JSX.Element {
   });
 
   const [sidecarPort, setSidecarPort] = useState(() => {
-    const fromEnv = window.localStorage.getItem("chhanni:sidecarPort");
-    return fromEnv ? Number(fromEnv) : 8080;
+    const stored = window.localStorage.getItem("chhanni:sidecarPort");
+    return stored ? Number(stored) : 8080;
+  });
+  const [classifierPort, setClassifierPort] = useState(() => {
+    const stored = window.localStorage.getItem("chhanni:classifierPort");
+    return stored ? Number(stored) : 8081;
   });
 
   useEffect(() => {
     window.localStorage.setItem("chhanni:sidecarPort", String(sidecarPort));
   }, [sidecarPort]);
+  useEffect(() => {
+    window.localStorage.setItem("chhanni:classifierPort", String(classifierPort));
+  }, [classifierPort]);
+
+  const categories = useQuery({
+    queryKey: ["categories", accountId],
+    queryFn: () => tauriApi.classificationSummary(accountId),
+  });
 
   const embed = useMutation({
     mutationFn: () => tauriApi.embedRun(accountId, sidecarPort),
@@ -200,6 +212,13 @@ function ClusterPanel({ accountId }: ClusterPanelProps): JSX.Element {
     },
   });
 
+  const classify = useMutation({
+    mutationFn: () => tauriApi.classifyRun(accountId, classifierPort),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["categories", accountId] });
+    },
+  });
+
   return (
     <div className="mt-3 border-t border-zinc-800 pt-3">
       <div className="flex items-center justify-between gap-3">
@@ -209,13 +228,26 @@ function ClusterPanel({ accountId }: ClusterPanelProps): JSX.Element {
             : "—"}
         </div>
         <div className="flex items-center gap-2">
-          <input
-            type="number"
-            value={sidecarPort}
-            onChange={(e) => setSidecarPort(Number(e.target.value))}
-            className="w-20 rounded border border-zinc-800 bg-zinc-950 px-2 py-1 text-xs text-zinc-200"
-            title="llama-server port"
-          />
+          <label className="flex items-center gap-1 text-[10px] text-zinc-500">
+            embed
+            <input
+              type="number"
+              value={sidecarPort}
+              onChange={(e) => setSidecarPort(Number(e.target.value))}
+              className="w-16 rounded border border-zinc-800 bg-zinc-950 px-1 py-1 text-xs text-zinc-200"
+              title="embedding llama-server port"
+            />
+          </label>
+          <label className="flex items-center gap-1 text-[10px] text-zinc-500">
+            classify
+            <input
+              type="number"
+              value={classifierPort}
+              onChange={(e) => setClassifierPort(Number(e.target.value))}
+              className="w-16 rounded border border-zinc-800 bg-zinc-950 px-1 py-1 text-xs text-zinc-200"
+              title="classifier llama-server port"
+            />
+          </label>
           <button
             type="button"
             onClick={() => embed.mutate()}
@@ -232,8 +264,36 @@ function ClusterPanel({ accountId }: ClusterPanelProps): JSX.Element {
           >
             {cluster.isPending ? "Clustering…" : "Cluster"}
           </button>
+          <button
+            type="button"
+            onClick={() => classify.mutate()}
+            disabled={classify.isPending}
+            className="rounded-md bg-emerald-700 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-emerald-600 disabled:opacity-50"
+          >
+            {classify.isPending ? "Classifying…" : "Classify"}
+          </button>
         </div>
       </div>
+
+      {categories.data && categories.data.length > 0 ? (
+        <div className="mt-2 flex flex-wrap gap-1 text-[10px] text-zinc-400">
+          {categories.data.map((b) => (
+            <span
+              key={b.category}
+              className="rounded bg-zinc-800/60 px-1.5 py-0.5"
+              title={`${b.count} messages`}
+            >
+              {b.category}: {b.count.toLocaleString()}
+            </span>
+          ))}
+        </div>
+      ) : null}
+
+      {classify.isError ? (
+        <p className="mt-2 text-xs text-red-400">
+          {classify.error instanceof Error ? classify.error.message : "Classification failed"}
+        </p>
+      ) : null}
 
       {embed.isError ? (
         <p className="mt-2 text-xs text-red-400">
