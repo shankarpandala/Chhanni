@@ -12,3 +12,6 @@ Things discovered out of current phase scope. Do not silently implement.
 - **Real app icons**: current `src-tauri/icons/*` are zinc-colored placeholders + stub .icns/.ico files. Replace before any release build.
 - **Linux dev prerequisites doc**: `libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev pkg-config` must be installed for `cargo check` to pass in container. Worth scripting via a session-start hook.
 - **SQLCipher** for encrypted-at-rest SQLite. Tracking against a future threat-model bump.
+- **`dotenvy` for local dev**: load `.env` automatically on `pnpm tauri dev` so contributors don't have to export shell vars.
+- **End-to-end OAuth tests via `wiremock`**: simulate Google's token endpoint to cover the full code-for-token swap and refresh path.
+- **Account-management UX**: remove button, re-consent on revoked refresh tokens, avatars from `userinfo.picture`.

@@ -98,6 +98,33 @@ Append-only. One entry per non-trivial choice. Format:
 
 ---
 
+## 2026-05-25 — OAuth account index in keychain (no SQLite yet)
+
+**Context**: Phase 1 needs to enumerate connected accounts on app restart, but Phase 2 hasn't shipped SQLite. Two options: a small JSON file in app data, or a keychain entry holding the account index.
+**Decision**: Single keychain entry `accounts_index` holds a JSON array of `AccountRecord`s. Individual tokens live under `account::<id>::token`.
+**Reasoning**: The account list is non-secret but also tiny and already paired with the keychain-resident tokens; co-locating avoids a second persistence boundary that we'd just have to delete in Phase 2.
+**Reversibility**: easy — migrate to SQLite in Phase 2 by reading the index once and dropping the keychain entry.
+
+---
+
+## 2026-05-25 — OAuth callback strategy: loopback localhost only
+
+**Context**: Google's "Desktop application" client type supports loopback redirects and "out-of-band" (deprecated). Tauri also supports custom URL schemes via the `deep-link` plugin.
+**Decision**: Loopback only (`http://127.0.0.1:<dynamic-port>/callback`).
+**Reasoning**: Works for any provider that accepts loopback (Google, Microsoft Graph for native apps). Avoids registering a custom URL scheme with the OS — one fewer install-time hook to coordinate. Dynamic port comes from `TcpListener::bind("127.0.0.1:0")`.
+**Reversibility**: moderate — could co-exist with a deep-link backup later.
+
+---
+
+## 2026-05-25 — Token refresh: explicit short retry with backoff
+
+**Context**: CLAUDE.md mandates timeouts and bounded retries on every external call.
+**Decision**: `ensure_fresh_token` retries up to 3 times with 250 ms / 500 ms / 1 s exponential backoff. Reqwest client has a 30 s timeout. Callback timeout is 5 minutes.
+**Reasoning**: Refresh failures are usually transient (network hiccup, brief 5xx). 3 attempts gives ~2 s of headroom without leaving the UI hanging. 5 min callback is generous enough that users can fish out a 2FA app without rage-quitting.
+**Reversibility**: easy.
+
+---
+
 ## 2026-05-25 — Icons: placeholder for now
 
 **Context**: Tauri's `generate_context!` requires icon paths to exist at compile time.
