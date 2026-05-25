@@ -5,6 +5,7 @@ import {
   type AccountSummary,
   type ActionType,
   type ClusterSampleMessage,
+  type ExecuteProgress,
   type ReviewClusterEntry,
 } from "./lib/tauri";
 
@@ -106,6 +107,11 @@ function ReviewBody({ accountId }: { accountId: string }): JSX.Element {
         </div>
       </div>
 
+      <ExecutorPanel
+        accountId={accountId}
+        stagedTotal={queue.data?.staged_total ?? 0}
+      />
+
       {queue.isLoading ? (
         <p className="mt-4 text-xs text-zinc-500">Loading…</p>
       ) : null}
@@ -124,6 +130,103 @@ function ReviewBody({ accountId }: { accountId: string }): JSX.Element {
         </ul>
       )}
     </section>
+  );
+}
+
+function ExecutorPanel({
+  accountId,
+  stagedTotal,
+}: {
+  accountId: string;
+  stagedTotal: number;
+}): JSX.Element {
+  const queryClient = useQueryClient();
+  const [progress, setProgress] = useState<ExecuteProgress | null>(null);
+  const [running, setRunning] = useState(false);
+
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    void tauriApi
+      .onExecuteProgress((p) => {
+        if (p.account_id === accountId) {
+          setProgress(p);
+        }
+      })
+      .then((fn) => {
+        unlisten = fn;
+      });
+    return () => {
+      unlisten?.();
+    };
+  }, [accountId]);
+
+  const counts = useQuery({
+    queryKey: ["actionsLogCounts", accountId],
+    queryFn: () => tauriApi.actionsLogCounts(accountId),
+  });
+
+  const run = useMutation({
+    mutationFn: () => tauriApi.runExecutor(accountId),
+    onMutate: () => {
+      setRunning(true);
+      setProgress(null);
+    },
+    onSettled: () => {
+      setRunning(false);
+      void queryClient.invalidateQueries({ queryKey: ["reviewQueue", accountId] });
+      void queryClient.invalidateQueries({ queryKey: ["actionsLogCounts", accountId] });
+    },
+  });
+
+  const cancel = useMutation({
+    mutationFn: () => tauriApi.cancelExecutor(accountId),
+  });
+
+  return (
+    <div className="mt-4 rounded border border-zinc-800 bg-zinc-950 p-3">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-sm font-medium">Execute staged actions</div>
+          <div className="mt-0.5 text-xs text-zinc-400">
+            {stagedTotal} action{stagedTotal === 1 ? "" : "s"} queued ·{" "}
+            {counts.data?.success ?? 0} succeeded all-time ·{" "}
+            {counts.data?.failure ?? 0} failed
+          </div>
+        </div>
+        <div className="flex gap-2">
+          {running ? (
+            <button
+              type="button"
+              onClick={() => cancel.mutate()}
+              disabled={cancel.isPending}
+              className="rounded-md bg-red-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-600 disabled:opacity-50"
+            >
+              Cancel
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => run.mutate()}
+            disabled={running || stagedTotal === 0}
+            className="rounded-md bg-emerald-700 px-4 py-1.5 text-xs font-medium text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {running ? "Running…" : "Run cleanup"}
+          </button>
+        </div>
+      </div>
+      {progress ? (
+        <div className="mt-2 text-xs text-zinc-400">
+          batch {progress.batches_done} · {progress.messages_done.toLocaleString()} done ·{" "}
+          {progress.failures.toLocaleString()} failed ·{" "}
+          {(progress.elapsed_ms / 1000).toFixed(1)}s
+        </div>
+      ) : null}
+      {run.isError ? (
+        <p className="mt-2 text-xs text-red-400">
+          {run.error instanceof Error ? run.error.message : "Execution failed"}
+        </p>
+      ) : null}
+    </div>
   );
 }
 

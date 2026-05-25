@@ -42,9 +42,11 @@ pub fn run() {
         }
     };
 
+    let registry = commands::execute::ExecutorRegistry::default();
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(state)
+        .manage(registry)
         .invoke_handler(tauri::generate_handler![
             commands::gmail::gmail_connect_account,
             commands::gmail::gmail_list_accounts,
@@ -64,6 +66,10 @@ pub fn run() {
             commands::review::unstage_action,
             commands::review::list_staged_actions,
             commands::review::expand_cluster,
+            commands::execute::run_executor,
+            commands::execute::cancel_executor,
+            commands::execute::actions_log_counts,
+            commands::execute::actions_log_recent,
         ]);
 
     if let Err(err) = builder.run(tauri::generate_context!()) {

@@ -329,3 +329,52 @@ User: "use the most recent and advanced models that fit in m5 pro 24 GB vram".
 
 **Next**
 - Phase 6 (action execution via Gmail `batchModify` / `batchDelete` with exponential backoff). Continues next turn.
+
+---
+
+## 2026-05-25 — Phase 6: Action execution (✅ shipped)
+
+**Shipped**
+- Migration `V009__actions_log`: `actions_log(id, account_id, staged_action_id, cluster_key, provider_msg_id, action_type, outcome, error_message, executed_at)` with indexes on `(account, executed_at DESC)` and `(account, outcome)`.
+- `providers::gmail::mutations::GmailMutations` trait + `GmailMutationsClient` impl. Five batch operations: archive (remove INBOX), trash (add TRASH / remove INBOX), add_label, remove_label, mark_read; plus `batch_delete` reserved for the future. Exponential backoff up to 5 attempts on 429/5xx with 1s/2s/4s/8s/16s ceiling.
+- `actions::log::ActionsLogRepo` — bulk tx record_many, `counts`, `list_recent`. Captures Outcome enum (success/failure/cancelled/skipped).
+- `actions::executor::execute_account` orchestrator:
+  - Collects every `staged_actions` row (cluster-level rows fan out to current cluster members via a cached lookup so a single executor pass only reads each cluster's membership once).
+  - Deduplicates per (staged_id, cluster, action) so a cluster + per-message stage targeting the same message executes once.
+  - Drains in `BATCH_SIZE=1000` chunks against the mutator. Records `actions_log` outcome per message in a single tx per batch (success or failure). On cancellation, in-flight batch's targets get marked `cancelled` and the run returns `SyncError::Cancelled`.
+  - Removes the staged row after all its chunks finish (so a retry only re-targets what didn't ship).
+- `commands::execute`:
+  - `run_executor(account_id)` refreshes the access token, instantiates `GmailMutationsClient`, registers a `CancellationToken` in a shared `ExecutorRegistry`, emits `execute:progress` events.
+  - `cancel_executor(account_id)` flips the token.
+  - `actions_log_counts` / `actions_log_recent` for the UI.
+- Frontend `ExecutorPanel` in the Review tab: shows queued count, all-time success/failure totals, live progress (batch number, messages done, failures, elapsed), Run / Cancel buttons.
+
+**Tests** (+7 → 105 total)
+- `mutations`: retryable status matrix (429/5xx/200/4xx).
+- `actions::log`: record_many counts roll up correctly across outcomes; list_recent orders newest first.
+- `executor`:
+  - **Cluster-level archive fans out to all members** — single batchArchive call with all member ids, 3 success rows in `actions_log`, staged row removed.
+  - **Batching at the configured size** — 2,500 messages with `batch_size=1000` produces exactly 3 batches of sizes 1000/1000/500.
+  - **Failure logs outcome** — when `batch_archive` returns 500, all 2 ids get a `failure` log row with the error message.
+  - **Cancellation halts before the first batch** when pre-cancelled — no mutator calls made, executor returns `SyncError::Cancelled`.
+
+**Gate results**
+- `cargo check`, `cargo clippy --all-targets -- -D warnings`, `cargo test` (105 pass), `pnpm typecheck`, `pnpm build`, `pnpm lint` — all green.
+
+**Skipped / deferred**
+- `add_label` / `remove_label` / `unsubscribe` from the executor: they need extra args (which label, which one-click URL) that the Phase 5 chips don't supply. The executor returns a clear "phase-7 feature" error if dispatched. Tracked in BACKLOG.
+- Real Gmail mutation smoke test: requires a real account and a test mailbox we're OK trashing. User territory.
+- Re-sync after execution: locally `messages.label_ids` still reflects pre-execution state. The next incremental sync will pick up the provider's view. Not surfacing a "sync to refresh" hint in the UI yet — backlog.
+
+**Surprises**
+- `clippy::too_many_arguments` fired on `record_many` (8 args). Suppressed with `#[allow]` rather than wrapping in a struct since the call sites are internal and short-lived.
+- `Notify` plus an `AtomicBool` is the lightest cancellation token I could find without pulling in tokio-util's `CancellationToken`. Considered the latter; it's the bigger dep and we only need pre-batch-checks.
+- The original "remove the staged row" was inside the batch loop. Moved it outside (after all chunks finish) so a mid-cluster failure leaves the stage in place for a retry. Caught by review, not a test (yet).
+
+**User actions before local smoke**
+1. Stage some safe actions in the Review tab (e.g. archive an old promotional cluster on a junk mailbox).
+2. Click "Run cleanup" → watch live progress.
+3. Click "Cancel" mid-run → verify in-flight batch's ids show `cancelled` in `actions_log`.
+
+**Next**
+- Phase 7 (audit + undo with 30-day reversal window). Continues next turn.

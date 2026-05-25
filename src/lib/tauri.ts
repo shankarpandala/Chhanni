@@ -119,6 +119,33 @@ export interface StagedAction {
   staged_at: string;
 }
 
+export interface ExecuteProgress {
+  account_id: string;
+  batches_done: number;
+  messages_done: number;
+  failures: number;
+  elapsed_ms: number;
+}
+
+export interface OutcomeCounts {
+  success: number;
+  failure: number;
+  cancelled: number;
+  skipped: number;
+}
+
+export interface ActionLogEntry {
+  id: number;
+  account_id: string;
+  staged_action_id: number | null;
+  cluster_key: string;
+  provider_msg_id: string;
+  action_type: string;
+  outcome: string;
+  error_message: string | null;
+  executed_at: string;
+}
+
 export const tauriApi = {
   gmailConnectAccount: (): Promise<ConnectAccountResult> =>
     invoke<ConnectAccountResult>("gmail_connect_account"),
@@ -197,4 +224,23 @@ export const tauriApi = {
       clusterKey,
       limit,
     }),
+
+  runExecutor: (accountId: string): Promise<void> =>
+    invoke<void>("run_executor", { accountId }),
+  cancelExecutor: (accountId: string): Promise<boolean> =>
+    invoke<boolean>("cancel_executor", { accountId }),
+  actionsLogCounts: (accountId: string): Promise<OutcomeCounts> =>
+    invoke<OutcomeCounts>("actions_log_counts", { accountId }),
+  actionsLogRecent: (
+    accountId: string,
+    limit: number,
+  ): Promise<ActionLogEntry[]> =>
+    invoke<ActionLogEntry[]>("actions_log_recent", { accountId, limit }),
+
+  onExecuteProgress: (
+    handler: (p: ExecuteProgress) => void,
+  ): Promise<UnlistenFn> =>
+    listen<ExecuteProgress>("execute:progress", (event) =>
+      handler(event.payload),
+    ),
 };
