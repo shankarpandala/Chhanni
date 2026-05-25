@@ -218,6 +218,36 @@ Append-only. One entry per non-trivial choice. Format:
 
 ---
 
+## 2026-05-25 — Model pins re-bumped for 24 GB headroom
+
+**Context**: User requested "the most recent and advanced models that fit in M5 Pro 24 GB". The Phase 4 picks (nomic v2-moe + Qwen3-4B) used ≪ 4 GB total — under-using the hardware.
+**Decision**:
+- Embedding: `Qwen3-Embedding-0.6B` Q8_0 (639 MB; 1024-dim Matryoshka).
+- Classifier: `Qwen3-30B-A3B-Instruct-2507` Q4_K_M (18.6 GB; MoE, ~3 B active per token).
+- Combined ~19.25 GB → ~5 GB headroom.
+**Reasoning**: A 30B-A3B MoE classifier runs faster on Apple Silicon than a dense 14 B because Metal is memory-bandwidth bound — and we get the quality of a 30 B model when it matters. The 0.6 B Qwen3 embedder is the smallest member of the family that currently tops MTEB multilingual; its multilingual coverage matches the classifier's, which is useful for non-English mailboxes. Could go bigger on either (8 B embed, dense 14 B classifier) — chose this pair because it leaves clean room for the runtime.
+**Reversibility**: easy — `release.rs` is the only seam, all model paths are env-overridable.
+
+---
+
+## 2026-05-25 — Staged actions: two partial UNIQUE indexes
+
+**Context**: `staged_actions(account_id, cluster_key, action_type, provider_msg_id)` with `provider_msg_id` nullable. SQLite treats `NULL ≠ NULL` for UNIQUE constraints, so a single 4-col UNIQUE never deduplicates cluster-level (NULL) rows.
+**Decision**: Drop the 4-col UNIQUE. Add `idx_staged_actions_uniq_cluster` (3-col WHERE provider_msg_id IS NULL) and `idx_staged_actions_uniq_message` (4-col WHERE provider_msg_id IS NOT NULL). `INSERT ... ON CONFLICT(...) WHERE ...` selects the right index.
+**Reasoning**: Standard SQLite idiom for nullable-pair uniqueness. Caught by a test on the first try, fix touched only the migration + the two `INSERT` statements.
+**Reversibility**: easy.
+
+---
+
+## 2026-05-25 — Review queue rules: hard-coded thresholds, not user-configurable yet
+
+**Context**: SPEC §4 Phase 5 lists thresholds (90 d, 50 members, 0.6 confidence). Could expose as user settings.
+**Decision**: Ship with `RuleConfig::default()` baked in. Defer a settings panel until we have real-mailbox data to calibrate against.
+**Reasoning**: Settings UX is its own design surface (per-account? global? presets?). With no real data to tune against we'd just be guessing. The pure `propose_actions(facts, cfg)` shape means a settings panel later is a 30-minute add, not a refactor.
+**Reversibility**: easy.
+
+---
+
 ## 2026-05-25 — Icons: placeholder for now
 
 **Context**: Tauri's `generate_context!` requires icon paths to exist at compile time.

@@ -275,3 +275,57 @@ Logged in `DECISIONS.md`. SPEC.md not edited (it documents the original product 
 
 **Next**
 - Phase 5 (review queue UI with rule-based proposed actions). Continues next turn.
+
+---
+
+## 2026-05-25 — Model pins re-bumped for 24 GB headroom
+
+User: "use the most recent and advanced models that fit in m5 pro 24 GB vram".
+
+- **Embedding** `nomic-embed-text-v2-moe` Q8_0 → **`Qwen3-Embedding-0.6B`** Q8_0 (639 MB). Top-of-family small embedding (the 8B sibling tops MTEB multilingual at 70.58; the 0.6B variant keeps the same ranking architecture). 1024-dim output (Matryoshka so callers can truncate).
+- **Classifier** `Qwen3-4B-Instruct-2507` Q4_K_M → **`Qwen3-30B-A3B-Instruct-2507`** Q4_K_M (18.6 GB). MoE with ~3 B active params per token → 50-100 tok/s on Apple Silicon, best JSON-schema following in the size class.
+- **Combined RAM**: 0.64 + 18.6 ≈ 19.25 GB → ~5 GB headroom on a 24 GB M5 Pro for OS + Tauri + browser.
+
+`EmbedConfig.expected_dim` bumped 768 → 1024 to match. `cargo test` still green at 85.
+
+---
+
+## 2026-05-25 — Phase 5: Review queue + rule-based proposed actions (✅ shipped)
+
+**Shipped**
+- Migration `V008__staged_actions` + two partial UNIQUE indexes (one for cluster-wide rows where `provider_msg_id IS NULL`, one for per-message rows) so idempotent ON CONFLICT works correctly under SQLite's "NULL distinct" semantics.
+- `actions::rules::propose_actions(facts, cfg)` — pure function over a `ClusterFacts` struct. Rules:
+  - `promotional` + oldest message > 90 d → archive (and unsubscribe if `List-Unsubscribe` present).
+  - `notification` + ≥ 50 members → trash.
+  - `newsletter` + `List-Unsubscribe` → unsubscribe.
+  - `social` + high volume → archive.
+  - `transactional` + > 365 d → archive.
+  - `security` / `personal` / `work` / `unknown` → never propose destructive actions.
+  - Hard floor: classifications with confidence < 0.6 propose nothing.
+- `actions::staged::StagedActionsRepo` — `stage_cluster`, `stage_message`, `unstage_cluster`, `unstage_by_id`, `list_for_account`, `count_for_account`.
+- Tauri commands: `list_review_queue` (joins clusters + classifications + staged + rule engine in one call), `stage_action`, `unstage_action`, `list_staged_actions`, `expand_cluster`.
+- Frontend `Review` view with a 3-state filter (with-proposed / staged / all), cluster cards showing category + confidence + member count + oldest age, expand-to-see-samples drawer, one-click stage/unstage that flips proposed-action chips between "stage me" and "✓ staged".
+- Two-tab navigation in `App.tsx` (`Accounts` / `Review`); accounts query lifted to App level so both views see the same data.
+
+**Tests** (+13 → 98 total)
+- Rule engine: 9 tests — old promotional → archive, recent promotional → no-op, high-volume notification → trash, low-volume → no-op, security/personal never actioned, low-confidence blocks all rules, newsletter + List-Unsubscribe → unsubscribe, old transactional → archive.
+- Staged actions repo: 4 tests — stage + list round-trip, idempotent re-stage (the bug that surfaced with the original 4-col UNIQUE-with-NULL design), cluster + message-level actions coexist, unstage only touches cluster-level rows.
+
+**Gate results**
+- `cargo check`, `cargo clippy --all-targets -- -D warnings`, `cargo test` (98 pass), `pnpm typecheck`, `pnpm build`, `pnpm lint` — all green.
+
+**Surprises**
+- Initial migration used a plain `UNIQUE(account, cluster, action, provider_msg_id)`. SQLite treats NULL as distinct in UNIQUE, so cluster-level rows (provider_msg_id IS NULL) never deduped. Caught by the `staging_same_cluster_twice_is_idempotent` test. Fix: two partial unique indexes, one for the NULL case and one for the NOT NULL case, with the ON CONFLICT clause referencing the right partial index via `WHERE` predicates.
+- `useQuery` is fine to lift to App.tsx but its return type passes around awkwardly across components. Solved with `ReturnType<typeof useQuery<…>>` rather than re-running the query in each child.
+
+**Deferred**
+- Per-message bulk select inside the expand drawer (UI exists but currently shows samples read-only). Tracked in BACKLOG.
+- Virtualized list (TanStack Virtual): not needed yet — at the SPEC's 200-cluster target React renders the full list in ≪1 frame. Will add when we see > 1k clusters.
+- Settings panel for tuning the 0.6 confidence floor and 90/50-day thresholds. BACKLOG.
+
+**User actions before local smoke**
+1. Run sync → embed → cluster → classify on at least one account.
+2. Switch to the **Review** tab. The "with-proposed" filter should show every actionable cluster. Click the action chips to stage/unstage.
+
+**Next**
+- Phase 6 (action execution via Gmail `batchModify` / `batchDelete` with exponential backoff). Continues next turn.

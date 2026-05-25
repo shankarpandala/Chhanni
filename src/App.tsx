@@ -5,8 +5,17 @@ import {
   type AccountSummary,
   type SyncProgress,
 } from "./lib/tauri";
+import { Review } from "./Review";
+
+type View = "accounts" | "review";
 
 export function App(): JSX.Element {
+  const [view, setView] = useState<View>("accounts");
+  const accountsQuery = useQuery({
+    queryKey: ["accountSummaries"],
+    queryFn: tauriApi.gmailAccountSummaries,
+  });
+
   return (
     <main className="flex min-h-screen flex-col items-center bg-zinc-950 px-6 py-12 text-zinc-100">
       <header className="text-center">
@@ -15,17 +24,37 @@ export function App(): JSX.Element {
           On-device inbox cleanup. Nothing leaves your machine.
         </p>
       </header>
-      <ConnectPanel />
+      <nav className="mt-6 flex gap-2 text-xs">
+        {(["accounts", "review"] as const).map((v) => (
+          <button
+            key={v}
+            type="button"
+            onClick={() => setView(v)}
+            className={`rounded px-3 py-1.5 capitalize ${
+              view === v
+                ? "bg-emerald-700 text-white"
+                : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+            }`}
+          >
+            {v}
+          </button>
+        ))}
+      </nav>
+      {view === "accounts" ? (
+        <ConnectPanel accountsQuery={accountsQuery} />
+      ) : (
+        <Review accounts={accountsQuery.data ?? []} />
+      )}
     </main>
   );
 }
 
-function ConnectPanel(): JSX.Element {
+interface ConnectPanelProps {
+  accountsQuery: ReturnType<typeof useQuery<AccountSummary[], Error>>;
+}
+
+function ConnectPanel({ accountsQuery }: ConnectPanelProps): JSX.Element {
   const queryClient = useQueryClient();
-  const accountsQuery = useQuery({
-    queryKey: ["accountSummaries"],
-    queryFn: tauriApi.gmailAccountSummaries,
-  });
 
   const connect = useMutation({
     mutationFn: tauriApi.gmailConnectAccount,

@@ -69,6 +69,56 @@ export interface CategoryBucket {
   count: number;
 }
 
+export type ActionType =
+  | "archive"
+  | "trash"
+  | "add_label"
+  | "remove_label"
+  | "mark_read"
+  | "unsubscribe";
+
+export interface ProposedAction {
+  action: ActionType;
+  reason: string;
+}
+
+export interface ReviewClusterEntry {
+  cluster_key: string;
+  category: string;
+  confidence: number;
+  member_count: number;
+  oldest_message_age_days: number | null;
+  has_list_unsubscribe: boolean;
+  sample_sender: string | null;
+  sample_subject: string | null;
+  proposed: ProposedAction[];
+  staged_action_types: string[];
+}
+
+export interface ReviewQueue {
+  entries: ReviewClusterEntry[];
+  staged_total: number;
+}
+
+export interface ClusterSampleMessage {
+  provider_msg_id: string;
+  sender: string | null;
+  subject: string | null;
+  snippet: string | null;
+  internal_date: number;
+}
+
+export interface StagedAction {
+  id: number;
+  account_id: string;
+  cluster_key: string;
+  provider_msg_id: string | null;
+  action_type: string;
+  payload: string;
+  proposed_reason: string | null;
+  staged_at: string;
+}
+
 export const tauriApi = {
   gmailConnectAccount: (): Promise<ConnectAccountResult> =>
     invoke<ConnectAccountResult>("gmail_connect_account"),
@@ -114,4 +164,37 @@ export const tauriApi = {
     listen<BootstrapProgress>("embed:bootstrap", (event) =>
       handler(event.payload),
     ),
+
+  listReviewQueue: (accountId: string): Promise<ReviewQueue> =>
+    invoke<ReviewQueue>("list_review_queue", { accountId }),
+  stageAction: (
+    accountId: string,
+    clusterKey: string,
+    actionType: ActionType,
+    reason: string | null,
+  ): Promise<number> =>
+    invoke<number>("stage_action", {
+      accountId,
+      clusterKey,
+      actionType,
+      reason,
+    }),
+  unstageAction: (
+    accountId: string,
+    clusterKey: string,
+    actionType: ActionType,
+  ): Promise<number> =>
+    invoke<number>("unstage_action", { accountId, clusterKey, actionType }),
+  listStagedActions: (accountId: string): Promise<StagedAction[]> =>
+    invoke<StagedAction[]>("list_staged_actions", { accountId }),
+  expandCluster: (
+    accountId: string,
+    clusterKey: string,
+    limit: number,
+  ): Promise<ClusterSampleMessage[]> =>
+    invoke<ClusterSampleMessage[]>("expand_cluster", {
+      accountId,
+      clusterKey,
+      limit,
+    }),
 };

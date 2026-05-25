@@ -8,6 +8,7 @@
     )
 )]
 
+pub mod actions;
 pub mod auth;
 pub mod commands;
 pub mod db;
@@ -58,6 +59,11 @@ pub fn run() {
             commands::pipeline::embedding_status,
             commands::pipeline::classification_summary,
             commands::pipeline::classification_count,
+            commands::review::list_review_queue,
+            commands::review::stage_action,
+            commands::review::unstage_action,
+            commands::review::list_staged_actions,
+            commands::review::expand_cluster,
         ]);
 
     if let Err(err) = builder.run(tauri::generate_context!()) {
