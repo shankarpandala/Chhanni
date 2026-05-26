@@ -24,7 +24,10 @@ impl Default for GmailSyncConfig {
     fn default() -> Self {
         Self {
             list_page_size: 500,
-            metadata_concurrency: 20,
+            // Gmail's per-user-per-minute query quota is 15k. At ~50ms latency
+            // sustained concurrency of 20 burns ~24k/min and trips a 403
+            // rateLimitExceeded; 10 keeps us at ~12k/min with headroom.
+            metadata_concurrency: 10,
             persist_batch: 100,
         }
     }
