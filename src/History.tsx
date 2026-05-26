@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { tauriApi, type AccountSummary } from "./lib/tauri";
+import { errorMessage, tauriApi, type AccountSummary } from "./lib/tauri";
 
 interface HistoryProps {
   accounts: AccountSummary[];
@@ -133,7 +133,7 @@ function HistoryBody({ accountId }: { accountId: string }): JSX.Element {
       </ul>
       {undo.isError ? (
         <p className="mt-2 text-xs text-red-400">
-          {undo.error instanceof Error ? undo.error.message : "Undo failed"}
+          {errorMessage(undo.error, "Undo failed")}
         </p>
       ) : null}
     </section>

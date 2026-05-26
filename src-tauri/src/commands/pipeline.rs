@@ -10,8 +10,15 @@ use crate::pipeline::{
 };
 use crate::sidecar::{Bootstrapper, BootstrapProgress, HttpSidecarClient};
 
-fn stringify<E: std::fmt::Display>(e: E) -> String {
-    e.to_string()
+fn stringify<E: std::error::Error>(e: E) -> String {
+    let mut out = e.to_string();
+    let mut src = e.source();
+    while let Some(err) = src {
+        out.push_str(": ");
+        out.push_str(&err.to_string());
+        src = err.source();
+    }
+    out
 }
 
 #[tauri::command]
@@ -19,7 +26,7 @@ pub async fn embed_bootstrap(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    let data_dir = data_dir_for_app().map_err(stringify)?;
+    let data_dir = data_dir_for_app().map_err(|e| format!("{e:#}"))?;
     let boot = Bootstrapper::new(state.http.clone(), data_dir);
     let app_for_emit = app.clone();
     let sink = crate::sidecar::bootstrap::map_sink(Arc::new(move |p: BootstrapProgress| {
@@ -34,7 +41,7 @@ pub async fn classifier_bootstrap(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    let data_dir = data_dir_for_app().map_err(stringify)?;
+    let data_dir = data_dir_for_app().map_err(|e| format!("{e:#}"))?;
     let boot = Bootstrapper::new(state.http.clone(), data_dir);
     let app_for_emit = app.clone();
     let sink = crate::sidecar::bootstrap::map_sink(Arc::new(move |p: BootstrapProgress| {

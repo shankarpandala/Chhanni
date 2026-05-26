@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  errorMessage,
   tauriApi,
   type AccountSummary,
   type SyncProgress,
@@ -8,7 +9,6 @@ import {
 import { History } from "./History";
 import { Review } from "./Review";
 import { Settings } from "./Settings";
-import { errorMessage } from "./lib/tauri";
 
 type View = "accounts" | "review" | "history" | "settings";
 
@@ -245,7 +245,7 @@ function AccountCard({ account }: AccountCardProps): JSX.Element {
 
       {sync.isError ? (
         <p className="mt-2 text-xs text-red-400">
-          {sync.error instanceof Error ? sync.error.message : "Sync failed"}
+          {errorMessage(sync.error, "Sync failed")}
         </p>
       ) : null}
 
@@ -384,13 +384,13 @@ function ClusterPanel({ accountId }: ClusterPanelProps): JSX.Element {
 
       {classify.isError ? (
         <p className="mt-2 text-xs text-red-400">
-          {classify.error instanceof Error ? classify.error.message : "Classification failed"}
+          {errorMessage(classify.error, "Classification failed")}
         </p>
       ) : null}
 
       {embed.isError ? (
         <p className="mt-2 text-xs text-red-400">
-          {embed.error instanceof Error ? embed.error.message : "Embedding failed"}
+          {errorMessage(embed.error, "Embedding failed")}
         </p>
       ) : null}
 

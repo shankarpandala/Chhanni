@@ -10,8 +10,15 @@ use crate::commands::gmail::AppState;
 use crate::providers::gmail::{GmailMutations, GmailMutationsClient};
 use crate::providers::graph::GraphMutationsClient;
 
-fn stringify<E: std::fmt::Display>(e: E) -> String {
-    e.to_string()
+fn stringify<E: std::error::Error>(e: E) -> String {
+    let mut out = e.to_string();
+    let mut src = e.source();
+    while let Some(err) = src {
+        out.push_str(": ");
+        out.push_str(&err.to_string());
+        src = err.source();
+    }
+    out
 }
 
 #[tauri::command]
