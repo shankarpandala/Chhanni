@@ -438,15 +438,41 @@ function ClusterPanel({ accountId }: ClusterPanelProps): JSX.Element {
         </div>
       ) : null}
 
-      {classify.isError ? (
-        <p className="mt-2 text-xs text-red-400">
-          {errorMessage(classify.error, "Classification failed")}
+      {embed.isSuccess ? (
+        <p className="mt-2 text-xs text-emerald-400">
+          Embedded {embed.data.toLocaleString()} message
+          {embed.data === 1 ? "" : "s"}.
         </p>
       ) : null}
-
       {embed.isError ? (
         <p className="mt-2 text-xs text-red-400">
           {errorMessage(embed.error, "Embedding failed")}
+        </p>
+      ) : null}
+
+      {cluster.isSuccess ? (
+        <p className="mt-2 text-xs text-emerald-400">
+          {cluster.data === 0
+            ? "No clusters created — embed messages first."
+            : `Built ${cluster.data.toLocaleString()} cluster${cluster.data === 1 ? "" : "s"}.`}
+        </p>
+      ) : null}
+      {cluster.isError ? (
+        <p className="mt-2 text-xs text-red-400">
+          {errorMessage(cluster.error, "Clustering failed")}
+        </p>
+      ) : null}
+
+      {classify.isSuccess ? (
+        <p className="mt-2 text-xs text-emerald-400">
+          {classify.data === 0
+            ? "Nothing new to classify — either no clusters yet or they're already up to date."
+            : `Classified ${classify.data.toLocaleString()} cluster${classify.data === 1 ? "" : "s"}.`}
+        </p>
+      ) : null}
+      {classify.isError ? (
+        <p className="mt-2 text-xs text-red-400">
+          {errorMessage(classify.error, "Classification failed")}
         </p>
       ) : null}
 
