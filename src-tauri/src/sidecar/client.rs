@@ -56,13 +56,27 @@ impl HttpSidecarClient {
             .timeout(Duration::from_secs(5))
             .send()
             .await
-            .map_err(SidecarError::Http)?;
+            .map_err(|e| self.classify_send_error(e))?;
         if !resp.status().is_success() {
             return Err(SidecarError::HttpStatus {
                 status: resp.status().as_u16(),
             });
         }
         Ok(())
+    }
+
+    /// A `reqwest::Error` from `.send()` could be a timeout, a TLS failure,
+    /// or — most commonly when the sidecar isn't running — a TCP connect
+    /// failure. Surface the last case as `NotReachable` so the UI can show
+    /// a "start llama-server" hint instead of a stacked socket error.
+    fn classify_send_error(&self, e: reqwest::Error) -> SidecarError {
+        if e.is_connect() {
+            SidecarError::NotReachable {
+                base_url: self.base_url.clone(),
+            }
+        } else {
+            SidecarError::Http(e)
+        }
     }
 }
 
@@ -117,7 +131,7 @@ impl CompletionClient for HttpSidecarClient {
             .timeout(Duration::from_secs(120))
             .send()
             .await
-            .map_err(SidecarError::Http)?;
+            .map_err(|e| self.classify_send_error(e))?;
         if !resp.status().is_success() {
             return Err(SidecarError::HttpStatus {
                 status: resp.status().as_u16(),
@@ -143,7 +157,7 @@ impl EmbeddingClient for HttpSidecarClient {
             .timeout(Duration::from_secs(30))
             .send()
             .await
-            .map_err(SidecarError::Http)?;
+            .map_err(|e| self.classify_send_error(e))?;
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
             return Err(SidecarError::HttpStatus { status });
@@ -214,6 +228,22 @@ mod tests {
             HttpSidecarClient::with_base_url(reqwest::Client::new(), server.uri().to_string());
         let err = client.embed("hi").await.unwrap_err();
         assert!(matches!(err, SidecarError::HttpStatus { status: 503 }));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn embed_surfaces_not_reachable_when_nothing_is_listening() {
+        // Point at a port we just bound and immediately released so that any
+        // connect attempt is reliably refused. Avoids racing a real listener.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        let base_url = format!("http://127.0.0.1:{port}");
+        let client = HttpSidecarClient::with_base_url(reqwest::Client::new(), base_url.clone());
+        let err = client.embed("hi").await.unwrap_err();
+        match err {
+            SidecarError::NotReachable { base_url: got } => assert_eq!(got, base_url),
+            other => panic!("expected NotReachable, got: {other:?}"),
+        }
     }
 
     #[tokio::test(flavor = "current_thread")]

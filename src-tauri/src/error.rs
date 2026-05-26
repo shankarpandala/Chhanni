@@ -107,6 +107,11 @@ pub enum SidecarError {
     #[error("http: {0}")]
     Http(#[source] reqwest::Error),
 
+    #[error(
+        "sidecar not reachable at {base_url} — start `llama-server` on that port (see README) and retry"
+    )]
+    NotReachable { base_url: String },
+
     #[error("download returned http {status}")]
     HttpStatus { status: u16 },
 
