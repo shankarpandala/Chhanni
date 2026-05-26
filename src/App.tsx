@@ -215,6 +215,20 @@ function AccountCard({ account }: AccountCardProps): JSX.Element {
     },
   });
 
+  const remove = useMutation({
+    mutationFn: () => tauriApi.deleteAccount(account.account_id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["accountSummaries"] });
+    },
+  });
+
+  const onDeleteClick = (): void => {
+    const ok = window.confirm(
+      `Disconnect ${account.email}? This removes the OAuth token and every locally stored message, embedding, and cluster for this account.`,
+    );
+    if (ok) remove.mutate();
+  };
+
   return (
     <li className="rounded border border-zinc-800 bg-zinc-950 p-4">
       <div className="flex items-center justify-between gap-3">
@@ -225,14 +239,25 @@ function AccountCard({ account }: AccountCardProps): JSX.Element {
             {account.phase ? ` · ${account.phase}` : ""}
           </div>
         </div>
-        <button
-          type="button"
-          onClick={() => sync.mutate()}
-          disabled={sync.isPending}
-          className="rounded-md bg-zinc-800 px-3 py-1.5 text-xs font-medium text-zinc-100 transition hover:bg-zinc-700 disabled:opacity-50"
-        >
-          {sync.isPending ? "Syncing…" : "Sync"}
-        </button>
+        <div className="flex shrink-0 gap-2">
+          <button
+            type="button"
+            onClick={() => sync.mutate()}
+            disabled={sync.isPending || remove.isPending}
+            className="rounded-md bg-zinc-800 px-3 py-1.5 text-xs font-medium text-zinc-100 transition hover:bg-zinc-700 disabled:opacity-50"
+          >
+            {sync.isPending ? "Syncing…" : "Sync"}
+          </button>
+          <button
+            type="button"
+            onClick={onDeleteClick}
+            disabled={remove.isPending || sync.isPending}
+            title="Disconnect account and delete all local data"
+            className="rounded-md border border-red-900/60 bg-transparent px-3 py-1.5 text-xs font-medium text-red-300 transition hover:bg-red-950/40 disabled:opacity-50"
+          >
+            {remove.isPending ? "Deleting…" : "Delete"}
+          </button>
+        </div>
       </div>
 
       {progress && sync.isPending ? (
@@ -246,6 +271,12 @@ function AccountCard({ account }: AccountCardProps): JSX.Element {
       {sync.isError ? (
         <p className="mt-2 text-xs text-red-400">
           {errorMessage(sync.error, "Sync failed")}
+        </p>
+      ) : null}
+
+      {remove.isError ? (
+        <p className="mt-2 text-xs text-red-400">
+          {errorMessage(remove.error, "Delete failed")}
         </p>
       ) : null}
 

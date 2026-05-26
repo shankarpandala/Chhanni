@@ -84,6 +84,41 @@ pub fn gmail_list_accounts(
     state.token_store.list_accounts().map_err(stringify)
 }
 
+/// Remove every SQLite row belonging to `account_id`. FK CASCADE covers
+/// messages/threads/labels/sync_state/embeddings/staged_actions/actions_log;
+/// `cluster_classifications` has no FK to `accounts` so we delete it
+/// explicitly. Idempotent: a no-op for unknown ids.
+fn delete_account_rows(db: &Db, account_id: &str) -> crate::error::DbResult<()> {
+    db.with_connection(|conn| {
+        let tx = conn.transaction().map_err(crate::error::DbError::Sqlite)?;
+        tx.execute(
+            "DELETE FROM cluster_classifications WHERE account_id = ?1",
+            rusqlite::params![account_id],
+        )
+        .map_err(crate::error::DbError::Sqlite)?;
+        tx.execute(
+            "DELETE FROM accounts WHERE account_id = ?1",
+            rusqlite::params![account_id],
+        )
+        .map_err(crate::error::DbError::Sqlite)?;
+        tx.commit().map_err(crate::error::DbError::Sqlite)?;
+        Ok(())
+    })
+}
+
+/// Remove an account everywhere: keychain index + token plus every SQLite row.
+#[tauri::command]
+pub fn delete_account(
+    state: State<'_, AppState>,
+    account_id: String,
+) -> Result<(), String> {
+    delete_account_rows(&state.db, &account_id).map_err(stringify)?;
+    state
+        .token_store
+        .delete_account(&account_id)
+        .map_err(stringify)
+}
+
 #[tauri::command]
 pub async fn graph_connect_account(
     app: tauri::AppHandle,
@@ -266,4 +301,79 @@ fn stringify<E: std::error::Error>(e: E) -> String {
         src = err.source();
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::open_in_memory;
+
+    #[test]
+    fn delete_account_rows_cascades_messages_and_classifications() {
+        let db = open_in_memory().unwrap();
+        db.with_connection(|c| {
+            c.execute(
+                "INSERT INTO accounts (account_id, provider, email) VALUES ('a1', 'gmail', 'a@b')",
+                [],
+            )
+            .unwrap();
+            c.execute(
+                "INSERT INTO accounts (account_id, provider, email) VALUES ('a2', 'gmail', 'b@b')",
+                [],
+            )
+            .unwrap();
+            c.execute(
+                "INSERT INTO messages (account_id, provider_msg_id, thread_id, sender, sender_email, subject, snippet, internal_date, label_ids, history_id)
+                 VALUES ('a1', 'm1', 't1', 'X', 'x@y', 's', 'sn', 0, '[]', 0),
+                        ('a2', 'm2', 't2', 'X', 'x@y', 's', 'sn', 0, '[]', 0)",
+                [],
+            )
+            .unwrap();
+            c.execute(
+                "INSERT INTO cluster_classifications (account_id, cluster_key, category, confidence, model_version, prompt_version, cluster_signature)
+                 VALUES ('a1', 'c1', 'newsletter', 0.9, 'm', 'p', 'sig'),
+                        ('a2', 'c2', 'newsletter', 0.9, 'm', 'p', 'sig')",
+                [],
+            )
+            .unwrap();
+            Ok(())
+        })
+        .unwrap();
+
+        delete_account_rows(&db, "a1").unwrap();
+
+        db.with_connection(|c| {
+            let accounts: i64 = c
+                .query_row("SELECT count(*) FROM accounts WHERE account_id = 'a1'", [], |r| r.get(0))
+                .unwrap();
+            let msgs: i64 = c
+                .query_row("SELECT count(*) FROM messages WHERE account_id = 'a1'", [], |r| r.get(0))
+                .unwrap();
+            let cls: i64 = c
+                .query_row(
+                    "SELECT count(*) FROM cluster_classifications WHERE account_id = 'a1'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(accounts, 0, "accounts row removed");
+            assert_eq!(msgs, 0, "messages cascaded");
+            assert_eq!(cls, 0, "cluster_classifications removed");
+
+            // Untouched account survives.
+            let other: i64 = c
+                .query_row("SELECT count(*) FROM accounts WHERE account_id = 'a2'", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(other, 1);
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn delete_account_rows_is_idempotent_for_unknown_id() {
+        let db = open_in_memory().unwrap();
+        delete_account_rows(&db, "ghost").unwrap();
+        delete_account_rows(&db, "ghost").unwrap();
+    }
 }
