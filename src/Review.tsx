@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  errorMessage,
   tauriApi,
   type AccountSummary,
   type ActionType,
@@ -223,7 +224,7 @@ function ExecutorPanel({
       ) : null}
       {run.isError ? (
         <p className="mt-2 text-xs text-red-400">
-          {run.error instanceof Error ? run.error.message : "Execution failed"}
+          {errorMessage(run.error, "Execution failed")}
         </p>
       ) : null}
     </div>

@@ -4,8 +4,15 @@ use tauri::State;
 use crate::auth::config::OAuthProvider;
 use crate::commands::gmail::AppState;
 
-fn stringify<E: std::fmt::Display>(e: E) -> String {
-    e.to_string()
+fn stringify<E: std::error::Error>(e: E) -> String {
+    let mut out = e.to_string();
+    let mut src = e.source();
+    while let Some(err) = src {
+        out.push_str(": ");
+        out.push_str(&err.to_string());
+        src = err.source();
+    }
+    out
 }
 
 #[derive(Serialize)]
