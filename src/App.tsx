@@ -188,6 +188,7 @@ interface AccountCardProps {
 function AccountCard({ account }: AccountCardProps): JSX.Element {
   const queryClient = useQueryClient();
   const [progress, setProgress] = useState<SyncProgress | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   useEffect(() => {
     let unlisten: (() => void) | null = null;
@@ -222,13 +223,6 @@ function AccountCard({ account }: AccountCardProps): JSX.Element {
     },
   });
 
-  const onDeleteClick = (): void => {
-    const ok = window.confirm(
-      `Disconnect ${account.email}? This removes the OAuth token and every locally stored message, embedding, and cluster for this account.`,
-    );
-    if (ok) remove.mutate();
-  };
-
   return (
     <li className="rounded border border-zinc-800 bg-zinc-950 p-4">
       <div className="flex items-center justify-between gap-3">
@@ -248,17 +242,48 @@ function AccountCard({ account }: AccountCardProps): JSX.Element {
           >
             {sync.isPending ? "Syncing…" : "Sync"}
           </button>
-          <button
-            type="button"
-            onClick={onDeleteClick}
-            disabled={remove.isPending || sync.isPending}
-            title="Disconnect account and delete all local data"
-            className="rounded-md border border-red-900/60 bg-transparent px-3 py-1.5 text-xs font-medium text-red-300 transition hover:bg-red-950/40 disabled:opacity-50"
-          >
-            {remove.isPending ? "Deleting…" : "Delete"}
-          </button>
+          {confirmingDelete ? (
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  setConfirmingDelete(false);
+                  remove.mutate();
+                }}
+                disabled={remove.isPending}
+                className="rounded-md bg-red-700 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-red-600 disabled:opacity-50"
+              >
+                {remove.isPending ? "Deleting…" : "Confirm delete"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmingDelete(false)}
+                disabled={remove.isPending}
+                className="rounded-md bg-zinc-800 px-3 py-1.5 text-xs font-medium text-zinc-300 transition hover:bg-zinc-700 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirmingDelete(true)}
+              disabled={remove.isPending || sync.isPending}
+              title="Disconnect account and delete all local data"
+              className="rounded-md border border-red-900/60 bg-transparent px-3 py-1.5 text-xs font-medium text-red-300 transition hover:bg-red-950/40 disabled:opacity-50"
+            >
+              Delete
+            </button>
+          )}
         </div>
       </div>
+
+      {confirmingDelete ? (
+        <p className="mt-2 text-xs text-red-300">
+          This removes the OAuth token and every locally stored message,
+          embedding, and cluster for {account.email}. Irreversible.
+        </p>
+      ) : null}
 
       {progress && sync.isPending ? (
         <div className="mt-3 text-xs text-zinc-400">

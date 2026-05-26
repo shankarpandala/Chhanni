@@ -175,7 +175,7 @@ impl GmailClient {
                             .map_err(SyncError::Gmail);
                     }
                     let body = r.text().await.unwrap_or_default();
-                    if is_retryable(status) && attempt < RETRY_MAX {
+                    if should_retry(status, &body) && attempt < RETRY_MAX {
                         tracing::warn!(attempt, status = status.as_u16(), "gmail retryable error");
                         tokio::time::sleep(delay).await;
                         delay *= 2;
@@ -202,6 +202,18 @@ impl GmailClient {
 
 fn is_retryable(status: StatusCode) -> bool {
     status.as_u16() == 429 || status.is_server_error()
+}
+
+/// Gmail signals per-minute quota exhaustion as `403` with
+/// `reason: "rateLimitExceeded"` (or its newer `RATE_LIMIT_EXCEEDED` form)
+/// rather than a `429`. Treat those exactly like a `429` so the existing
+/// exponential backoff lets the quota window roll over.
+fn should_retry(status: StatusCode, body: &str) -> bool {
+    if is_retryable(status) {
+        return true;
+    }
+    status.as_u16() == 403
+        && (body.contains("rateLimitExceeded") || body.contains("RATE_LIMIT_EXCEEDED"))
 }
 
 #[async_trait]
@@ -316,5 +328,24 @@ mod tests {
         assert!(is_retryable(StatusCode::BAD_GATEWAY));
         assert!(!is_retryable(StatusCode::OK));
         assert!(!is_retryable(StatusCode::UNAUTHORIZED));
+    }
+
+    #[test]
+    fn should_retry_catches_403_rate_limit() {
+        // The actual 403 body Gmail returns when the per-minute quota is hit.
+        let body = r#"{"error":{"code":403,"errors":[{"reason":"rateLimitExceeded"}]}}"#;
+        assert!(should_retry(StatusCode::FORBIDDEN, body));
+
+        // The newer Google RPC ErrorInfo phrasing.
+        let body2 = r#"{"error":{"details":[{"reason":"RATE_LIMIT_EXCEEDED"}]}}"#;
+        assert!(should_retry(StatusCode::FORBIDDEN, body2));
+
+        // A non-rate-limit 403 (e.g. insufficient scope) must NOT loop forever.
+        let body3 =
+            r#"{"error":{"code":403,"errors":[{"reason":"insufficientPermissions"}]}}"#;
+        assert!(!should_retry(StatusCode::FORBIDDEN, body3));
+
+        // 429 still retries regardless of body.
+        assert!(should_retry(StatusCode::TOO_MANY_REQUESTS, ""));
     }
 }
