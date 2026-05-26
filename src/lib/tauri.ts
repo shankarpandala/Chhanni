@@ -175,6 +175,8 @@ export const tauriApi = {
     invoke<void>("gmail_sync", { accountId }),
   graphSync: (accountId: string): Promise<void> =>
     invoke<void>("graph_sync", { accountId }),
+  deleteAccount: (accountId: string): Promise<void> =>
+    invoke<void>("delete_account", { accountId }),
   onSyncProgress: (handler: (p: SyncProgress) => void): Promise<UnlistenFn> =>
     listen<SyncProgress>("sync:progress", (event) => handler(event.payload)),
 
